@@ -14,6 +14,11 @@ import (
 
 var maturities = map[string]bool{"seed": true, "developing": true, "stable": true}
 
+// liveStatuses are the truth-states a knowledge note may carry while it is still
+// live. `falsified` is not here: falsification is a move into
+// knowledge/archive/falsified/, and archived notes are validator-exempt.
+var liveStatuses = map[string]bool{"active": true, "disputed": true}
+
 // decayFields are required on knowledge/* notes and forbidden on projects/*.
 var decayFields = []string{"confidence", "maturity", "last_reinforced", "reinforce_count"}
 
@@ -124,6 +129,15 @@ func validateKnowledge(fm map[string]any) []string {
 
 	if srcs, ok := fm["sources"].([]any); !ok || len(srcs) == 0 {
 		errs = append(errs, "knowledge/* notes require non-empty `sources` listing provenance (wikilinks to daily/deep-thought notes)")
+	}
+
+	// `status` is optional (absent ⇒ active). A note the agent has actively
+	// contested is `disputed` — recorded dissent that survives, distinct from a
+	// note that merely decayed from neglect.
+	if s, present := fm["status"]; present {
+		if str, _ := s.(string); !liveStatuses[str] {
+			errs = append(errs, "knowledge/* `status`, if set, must be one of: active, disputed (falsification archives the note instead)")
+		}
 	}
 	return errs
 }

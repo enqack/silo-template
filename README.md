@@ -39,9 +39,9 @@ one command. If the database ever disagrees with the markdown, the database is w
 
 ## Retrieval
 
-Every note is chunked, embedded locally (Ollama, `nomic-embed-text`), and indexed for hybrid
-search: semantic similarity and keyword rank fused with reciprocal rank fusion. Agents reach
-it through an MCP tool (`query_knowledge`); humans through `silo-kb query "…"`.
+Every note is chunked, embedded locally (Ollama, `nomic-embed-text:v1.5`), and indexed for hybrid
+search: semantic similarity and keyword rank fused with reciprocal rank fusion (equal-weighted).
+Agents reach it through an MCP tool (`query_knowledge`); humans through `silo-kb query "…"`.
 
 ## Quickstart
 

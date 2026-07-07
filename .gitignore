@@ -1,5 +1,7 @@
 # derived Postgres index data — droppable by design
 .pg-data/
+# persisted socket dir for deep repo paths (machine-local, stable across reboots)
+.pg-socket-path
 
 # nix / direnv
 .direnv/

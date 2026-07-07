@@ -33,12 +33,13 @@ const (
 type Options struct {
 	Reinforce []string          // note ids or vault-relative paths
 	Graduate  map[string]string // id (or path) -> vault-relative destination under projects/
+	Falsify   map[string]string // id (or path) -> reason the theory was determined false
 	DryRun    bool
 	Now       time.Time
 }
 
 type Action struct {
-	Kind    string // reinforced | decayed | archived-faded | archived-ancient | graduated | promoted
+	Kind    string // reinforced | decayed | archived-faded | archived-ancient | falsified | graduated | promoted
 	Note    string // wikilink basename
 	Detail  string
 }
@@ -78,6 +79,10 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 	for k, v := range opts.Graduate {
 		graduate[k] = v
 	}
+	falsify := map[string]string{}
+	for k, v := range opts.Falsify {
+		falsify[k] = v
+	}
 
 	report := &Report{When: opts.Now}
 
@@ -87,6 +92,33 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		}
 		name := wikiname(n.Path)
 		abs := filepath.Join(vaultRoot, n.Path)
+
+		// 0. Falsify (explicit, wins over everything). A note the agent has
+		// determined false is archived with its reason — it was wrong, not
+		// forgotten — bypassing the confidence/decay machinery entirely.
+		if reason, ok := pick(falsify, n.ID(), n.Path); ok {
+			if strings.TrimSpace(reason) == "" {
+				return nil, fmt.Errorf("%s: refusing to falsify without a reason", n.Path)
+			}
+			dest := filepath.Join("knowledge/archive/falsified", filepath.Base(n.Path))
+			report.Actions = append(report.Actions, Action{"falsified", name, "(" + reason + ")"})
+			if !opts.DryRun {
+				setFM(n.FMNode, "status", "falsified")
+				setFM(n.FMNode, "falsified_reason", reason)
+				setFM(n.FMNode, "falsified_at", opts.Now.Format(validate.TimeLayout))
+				// Validate against the destination (archived ⇒ exempt), write in
+				// place, then move — same ordering as graduate.
+				src := n.Path
+				n.Path = dest
+				if err := writeNote(abs, n); err != nil {
+					return nil, err
+				}
+				if err := moveNote(vaultRoot, src, dest); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
 
 		conf := toFloat(n.Frontmatter["confidence"])
 		count := toInt(n.Frontmatter["reinforce_count"])

@@ -40,6 +40,9 @@ with vec as (
   where c.fts @@ q and ($3 = '' or n.project = $3)
   limit $5
 )
+-- Reciprocal Rank Fusion: the two legs are summed with equal weight (no
+-- coefficients) — a chunk's semantic rank and keyword rank vote equally. To bias
+-- toward one signal, scale a leg, e.g. 0.8*1.0/($6+vec.r) + 0.2*1.0/($6+kw.r).
 select n.path, n.type, coalesce(c.heading_path, ''), c.content,
        coalesce(1.0/($6 + vec.r), 0) + coalesce(1.0/($6 + kw.r), 0) as score
 from chunks c

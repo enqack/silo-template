@@ -67,6 +67,26 @@ func TestKnowledgeContract(t *testing.T) {
 	}
 }
 
+func TestKnowledgeStatus(t *testing.T) {
+	for _, s := range []string{"active", "disputed"} {
+		fm := validKnowledgeFM()
+		fm["status"] = s
+		if errs := Note("knowledge/concepts/x.md", fm, true); len(errs) != 0 {
+			t.Errorf("status %q should pass: %v", s, errs)
+		}
+	}
+	fm := validKnowledgeFM()
+	fm["status"] = "falsified" // falsified is a move into archive/, not a live status
+	if errs := Note("knowledge/concepts/x.md", fm, true); len(errs) == 0 {
+		t.Error("status=falsified on a live note should fail")
+	}
+	fm = validKnowledgeFM()
+	fm["status"] = "bogus"
+	if errs := Note("knowledge/concepts/x.md", fm, true); len(errs) == 0 {
+		t.Error("unknown status should fail")
+	}
+}
+
 func TestArchivedNotesExemptFromDecayFields(t *testing.T) {
 	fm := map[string]any{"id": "de6d5441-c97e-415f-b5ca-0df850ff0d84", "type": "concept"}
 	if errs := Note("knowledge/archive/faded/x.md", fm, true); len(errs) != 0 {

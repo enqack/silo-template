@@ -14,9 +14,14 @@ import (
 
 const (
 	DefaultBaseURL = "http://localhost:11434"
-	Model          = "nomic-embed-text"
-	Dim            = 768
-	batchSize      = 32
+	// Pinned to an explicit tag: an untagged ref resolves to :latest, which
+	// Ollama may silently move to a new release whose embeddings aren't
+	// comparable to what's already indexed. Must match the tag pulled in
+	// flake.nix exactly (Ollama treats :v1.5 and :latest as distinct models).
+	// After changing this, a full reindex is required: silo-kb reindex --full.
+	Model     = "nomic-embed-text:v1.5"
+	Dim       = 768
+	batchSize = 32
 )
 
 type Client struct {

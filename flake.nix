@@ -14,12 +14,19 @@
 
         # Unix-socket-only Postgres in an in-repo, gitignored data dir.
         # macOS caps sun_path at 104 bytes; fall back to a hashed $TMPDIR dir
-        # when the repo path is too deep.
+        # when the repo path is too deep. That fallback is persisted to
+        # .pg-socket-path (gitignored) so the socket — and thus SILOKB_DSN —
+        # stays stable across reboots, since macOS randomizes $TMPDIR per boot.
         pgEnv = ''
           export SILOKB_PGDATA="$PWD/.pg-data"
           SOCKDIR="$SILOKB_PGDATA"
           if [ "''${#SOCKDIR}" -gt 90 ]; then
-            SOCKDIR="''${TMPDIR:-/tmp}/silokb-$(echo -n "$PWD" | shasum | cut -c1-12)"
+            if [ -f .pg-socket-path ]; then
+              SOCKDIR="$(cat .pg-socket-path)"
+            else
+              SOCKDIR="''${TMPDIR:-/tmp}/silokb-$(echo -n "$PWD" | shasum | cut -c1-12)"
+              echo "$SOCKDIR" > .pg-socket-path
+            fi
             mkdir -p "$SOCKDIR"
           fi
           export SILOKB_SOCKDIR="$SOCKDIR"
@@ -73,19 +80,24 @@
           if [ ! -d .git ]; then
             ${pkgs.git}/bin/git init -q && say "initialized git repository — commit the scaffold when ready"
           fi
+          # Point git at the tracked hooks dir so the frontmatter-contract
+          # pre-commit gate runs (idempotent; the hook no-ops until silo-kb builds).
+          if [ -d .git ] && [ -f .githooks/pre-commit ]; then
+            ${pkgs.git}/bin/git config core.hooksPath .githooks
+          fi
 
           # 2. Vault scaffold (fresh silo only — a template clone ships one)
           if [ ! -d knowledge-base ]; then
             say "scaffolding knowledge-base/ (fresh silo)"
             mkdir -p knowledge-base/daily knowledge-base/deep-thoughts \
-              knowledge-base/knowledge/concepts knowledge-base/knowledge/connections \
-              knowledge-base/knowledge/qa knowledge-base/knowledge/lessons-learned \
-              knowledge-base/knowledge/cursed-knowledge knowledge-base/knowledge/archive/faded \
+              knowledge-base/knowledge/concepts knowledge-base/knowledge/cursed-knowledge \
+              knowledge-base/knowledge/lessons-learned \
+              knowledge-base/knowledge/archive/faded knowledge-base/knowledge/archive/falsified \
               knowledge-base/projects
             touch knowledge-base/daily/.gitkeep knowledge-base/deep-thoughts/.gitkeep \
-              knowledge-base/knowledge/concepts/.gitkeep knowledge-base/knowledge/connections/.gitkeep \
-              knowledge-base/knowledge/qa/.gitkeep knowledge-base/knowledge/lessons-learned/.gitkeep \
-              knowledge-base/knowledge/cursed-knowledge/.gitkeep knowledge-base/knowledge/archive/faded/.gitkeep \
+              knowledge-base/knowledge/concepts/.gitkeep knowledge-base/knowledge/cursed-knowledge/.gitkeep \
+              knowledge-base/knowledge/lessons-learned/.gitkeep \
+              knowledge-base/knowledge/archive/faded/.gitkeep knowledge-base/knowledge/archive/falsified/.gitkeep \
               knowledge-base/projects/.gitkeep
             cat > knowledge-base/index.md <<'EOF'
           ---
@@ -129,13 +141,13 @@
           # 5. Ollama + embedding model
           OLLAMA_OK=0
           if TAGS="$(${ollamaUp} 2>/dev/null)"; then
-            if echo "$TAGS" | grep -q nomic-embed-text; then
+            if echo "$TAGS" | grep -q 'nomic-embed-text:v1.5'; then
               OLLAMA_OK=1
             elif command -v ollama >/dev/null; then
-              say "pulling nomic-embed-text (one-time, ~270 MB)"
-              ollama pull nomic-embed-text >&2 && OLLAMA_OK=1 || warn "model pull failed"
+              say "pulling nomic-embed-text:v1.5 (one-time, ~270 MB)"
+              ollama pull nomic-embed-text:v1.5 >&2 && OLLAMA_OK=1 || warn "model pull failed"
             else
-              warn "ollama server is up but the ollama CLI is not on PATH — run: ollama pull nomic-embed-text"
+              warn "ollama server is up but the ollama CLI is not on PATH — run: ollama pull nomic-embed-text:v1.5"
             fi
           else
             warn "ollama not answering on :11434 — start it, then rerun silo-init (reindex skipped)"
@@ -176,10 +188,10 @@
           fi
 
           if TAGS="$(${ollamaUp} 2>/dev/null)"; then
-            if echo "$TAGS" | grep -q nomic-embed-text; then
-              ok "ollama up, nomic-embed-text ready"
+            if echo "$TAGS" | grep -q 'nomic-embed-text:v1.5'; then
+              ok "ollama up, nomic-embed-text:v1.5 ready"
             else
-              bad "ollama up but nomic-embed-text missing — run: ollama pull nomic-embed-text"
+              bad "ollama up but nomic-embed-text:v1.5 missing — run: ollama pull nomic-embed-text:v1.5"
             fi
           else
             bad "ollama down — embeddings (reindex/query) unavailable"

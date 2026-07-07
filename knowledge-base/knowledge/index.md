@@ -4,6 +4,7 @@
 
 ## Knowledge
 
+- [[deep-thoughts-craft]] `concept` seed·0.7
 - [[postgres-derived-index]] `concept` seed·0.7
 
 ## Projects
@@ -12,7 +13,7 @@
 
 ## Daily
 
-- [[2026-07-07]] `daily` — 2 concepts, 1 cursed knowledge, 1 log, 2 environment, 2 unresolved
+- [[2026-07-07]] `daily` — 3 concepts, 1 cursed knowledge, 1 log, 2 environment, 2 unresolved
 
 ## Deep Thoughts
 

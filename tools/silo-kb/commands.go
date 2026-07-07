@@ -115,10 +115,11 @@ func queryCmd() *cobra.Command {
 func compileCmd() *cobra.Command {
 	var reinforce []string
 	var graduate []string
+	var falsify []string
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "compile",
-		Short: "Run the knowledge lifecycle: reinforce, decay, archive, graduate",
+		Short: "Run the knowledge lifecycle: reinforce, decay, archive, falsify, graduate",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := findRepoRoot()
 			if err != nil {
@@ -132,9 +133,18 @@ func compileCmd() *cobra.Command {
 				}
 				grad[k] = v
 			}
+			fals := map[string]string{}
+			for _, f := range falsify {
+				k, v, ok := strings.Cut(f, "=")
+				if !ok || strings.TrimSpace(v) == "" {
+					return fmt.Errorf("--falsify wants <id-or-path>=<reason>, got %q", f)
+				}
+				fals[k] = v
+			}
 			report, err := compilepass.Run(root, compilepass.Options{
 				Reinforce: reinforce,
 				Graduate:  grad,
+				Falsify:   fals,
 				DryRun:    dryRun,
 			})
 			if err != nil {
@@ -149,6 +159,7 @@ func compileCmd() *cobra.Command {
 	}
 	cmd.Flags().StringSliceVar(&reinforce, "reinforce", nil, "note ids or vault-relative paths confirmed by this run")
 	cmd.Flags().StringSliceVar(&graduate, "graduate", nil, "<id-or-path>:<projects/dest.md> — move a stable article to canon")
+	cmd.Flags().StringSliceVar(&falsify, "falsify", nil, "<id-or-path>=<reason> — archive a theory determined false (records dissent, not decay)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report without writing")
 	return cmd
 }
