@@ -1,16 +1,25 @@
 # HUMAN.md
 
-The operator's digest of [CLAUDE.md](CLAUDE.md) — what the agents are contractually doing in
-this silo, and what you need to know to work alongside them. See [README.md](README.md) for
-the big picture.
+The operator's digest of [CLAUDE.md](CLAUDE.md) — what the agents are contractually doing in this silo,
+and what you need to know to work alongside them. See [README.md](README.md) for the big picture. All
+three docs share the section order below, so any section here maps onto the same section there.
 
-## The one rule that explains everything else
+## What this is
 
-`knowledge-base/` (markdown) is the single source of truth. Postgres is a derived search
-index: `pg-nuke` is always safe, and `pg-start && silo-kb reindex --full` rebuilds it
-entirely from the working tree. Never treat the database as authoritative.
+A silo is a coordination center for independent agentic projects — a shared, long-lived workspace where
+you and the AI agents keep projects, working theories, and settled decisions together, plus the tooling
+to search all of it. The projects this silo coordinates are listed in [PROJECTS.md](PROJECTS.md). Your
+job alongside the agents is mostly to trust the tiers, challenge the theories, and let the lifecycle
+run.
 
-## The vault, tier by tier
+## Layout & tiers
+
+The **one rule that explains everything else:** `knowledge-base/` (markdown) is the single source of
+truth. Postgres is a derived search index — `pg-nuke` is always safe, and
+`pg-start && silo-kb reindex --full` rebuilds it entirely from the working tree. Never treat the
+database as authoritative.
+
+The vault is four directories in three stances:
 
 | Tier | Path | What it is | Your stance |
 |---|---|---|---|
@@ -18,58 +27,51 @@ entirely from the working tree. Never treat the database as authoritative.
 | Working theory | `knowledge/` | Hypotheses with a confidence score that decays | Challenge freely — it's meant to be wrong sometimes |
 | Asserted canon | `projects/` | Settled per-project documentation | Trust it; changing it is a deliberate act |
 
-The signal is the directory: if a note lives under `projects/`, it's asserted; under
-`knowledge/`, it's hypothesized at the confidence its frontmatter states.
+The signal is the directory: if a note lives under `projects/`, it's asserted; under `knowledge/`, it's
+hypothesized at the confidence its frontmatter states. Within `knowledge/`, notes are filed by kind —
+`concepts/` (reusable patterns/principles), `cursed-knowledge/` (surprising gotchas — the durable home
+for daily `### Cursed Knowledge` capture), and `lessons-learned/` (authored postmortems). These folders
+are for your benefit; retrieval and the index key off frontmatter, not the folder.
 
-## How knowledge moves (the lifecycle)
+## The lifecycle
 
 Run via `/kb-compile` in Claude Code (or `silo-kb compile` by hand). Each run:
 
-- **Reinforces** articles the agent explicitly justifies (+0.1 confidence, capped at 1.0).
-  Mere mention doesn't count; nothing is inferred. Reinforcement is also what promotes
-  maturity: `seed`→`developing` at confidence ≥0.8, `developing`→`stable` at ≥0.9 with at
-  least 3 reinforcements — promotion never happens on decay or by hand-editing.
+- **Reinforces** articles the agent explicitly justifies (+0.1 confidence, capped at 1.0). Mere mention
+  doesn't count; nothing is inferred. Reinforcement is also what promotes maturity: `seed`→`developing`
+  at confidence ≥0.8, `developing`→`stable` at ≥0.9 with at least 3 reinforcements — promotion never
+  happens on decay or by hand-editing.
 - **Decays** articles untouched for >30 days (−0.1 per run).
 - **Falsifies** on demand (`--falsify <id>=<reason>`): a theory judged outright false is moved to
-  `knowledge/archive/falsified/` with its reason recorded — being wrong is logged, not left to
-  fade. (For a note you contest but haven't disproven, set `status: disputed` and leave it live.)
-- **Archives** faded articles (confidence ≤ 0 → `knowledge/archive/faded/`) and ancient ones
-  (no git commit in 6 months → `knowledge/archive/`; a note reinforced in the same run is
-  exempt).
-- **Graduates** on demand (`--graduate <id>:projects/<name>/<note>.md` — explicit and
-  agent-justified, like reinforcement; only `stable` notes qualify): the article moves — not
-  copies — into `projects/`, decay fields stripped, provenance (`sources:`) kept. Each run
-  also lists the stable, ungraduated notes as candidates for next time.
+  `knowledge/archive/falsified/` with its reason recorded — being wrong is logged, not left to fade.
+  (For a note you contest but haven't disproven, set `status: disputed` and leave it live.)
+- **Archives** faded articles (confidence ≤ 0 → `knowledge/archive/faded/`) and ancient ones (no git
+  commit in 6 months → `knowledge/archive/`; a note reinforced in the same run is exempt).
+- **Graduates** on demand (`--graduate <id>:projects/<name>/<note>.md` — explicit and agent-justified,
+  like reinforcement; only `stable` notes qualify): the article moves — not copies — into `projects/`,
+  decay fields stripped, provenance (`sources:`) kept. Each run also lists the stable, ungraduated
+  notes as candidates for next time.
 
-Every run appends to `knowledge-base/knowledge/log.md` — that's your audit trail. `git log`
-plus that file explains why any note changed, moved, or vanished.
+Every run appends to `knowledge-base/knowledge/log.md` — that's your audit trail. `git log` plus that
+file explains why any note changed, moved, or vanished.
 
-Within `knowledge/`, notes are filed by kind: `concepts/` (reusable patterns/principles),
-`cursed-knowledge/` (surprising gotchas — the durable home for daily `## Cursed Knowledge` capture),
-and `lessons-learned/` (authored postmortems — what worked, what didn't). These are for your benefit;
-retrieval and the index key off frontmatter, not the folder.
+## The frontmatter contract
 
-## Files you must never hand-edit
+Every note except `index.md`/`log.md` needs `id` (a UUID, assigned once, never reused — moves keep it)
+and `type`. Notes under `knowledge/` additionally need `confidence` (0–1), `maturity`
+(`seed`/`developing`/`stable`), `last_reinforced`, `reinforce_count`, and a non-empty `sources` list.
+Notes under `projects/` must **not** carry those decay fields. Timestamps are `YYYY-MM-DD HH:MM:SS`
+local time. Wikilinks (`[[note]]`) for vault-internal links; plain relative markdown links for real
+repo files. (The frontmatter contract in [CLAUDE.md](CLAUDE.md) is the exhaustive version.)
 
-- `knowledge-base/knowledge/index.md` — generated by `silo-kb sync-index`.
-- `knowledge-base/knowledge/log.md` — appended only by `silo-kb compile`.
+**Two files you must never hand-edit:** `knowledge-base/knowledge/index.md` (generated by `silo-kb
+sync-index`) and `knowledge-base/knowledge/log.md` (appended only by `silo-kb compile`). A hook blocks
+agents from editing these and from writing notes with broken frontmatter; the same contract applies to
+you. That agent-side hook only fires inside Claude Code, so a tracked git pre-commit hook
+(`.githooks/pre-commit`, wired by `silo-init` via `core.hooksPath`) runs the *same* validator on `git
+commit` and rejects the commit on any violation — `git commit --no-verify` bypasses it in an emergency.
 
-A hook blocks agents from editing these (and from writing notes with broken frontmatter);
-the same contract applies to you. That agent-side hook only fires inside Claude Code, so a
-tracked `git` pre-commit hook (`.githooks/pre-commit`, wired by `silo-init` via
-`core.hooksPath`) runs the *same* validator on `git commit` and rejects the commit on any
-violation — `git commit --no-verify` bypasses it in an emergency.
-
-## Frontmatter contract (what the validator enforces)
-
-Every note except `index.md`/`log.md` needs `id` (a UUID, assigned once, never reused —
-moves keep it) and `type`. Notes under `knowledge/` additionally need `confidence` (0–1),
-`maturity` (`seed`/`developing`/`stable`), `last_reinforced`, `reinforce_count`, and a
-non-empty `sources` list. Notes under `projects/` must **not** carry those decay fields.
-Timestamps are `YYYY-MM-DD HH:MM:SS` local time. Wikilinks (`[[note]]`) for vault-internal
-links; plain relative markdown links for real repo files.
-
-## Day-to-day operation
+## Tooling & commands
 
 ```sh
 nix develop                 # auto-starts everything and prints a status banner
@@ -81,22 +83,23 @@ ollama-start / ollama-stop  # start/stop the embedding server (see below)
 SILOKB_NO_AUTOSTART=1       # env var: enter the shell without the bootstrap
 ```
 
-Ollama is bundled in the dev shell, so nothing extra to install. `ollama-start` (run by the
-bootstrap) reuses a server already listening on `:11434` — a native macOS app for Metal, or a
-NixOS `services.ollama` — and only starts the bundled server as a fallback; `ollama-stop` stops
-only a server it started. The model is `nomic-embed-text:v1.5`, pulled automatically if missing.
-If you ever change that model, run `silo-kb reindex --full` — embeddings from different models
-aren't comparable.
+(The full `silo-kb` command table lives under Tooling & commands in [CLAUDE.md](CLAUDE.md).) Ollama is
+bundled in the dev shell, so
+nothing extra to install. `ollama-start` (run by the bootstrap) reuses a server already listening on
+`:11434` — a native macOS app for Metal, or a NixOS `services.ollama` — and only starts the bundled
+server as a fallback; `ollama-stop` stops only a server it started. The model is `nomic-embed-text:v1.5`,
+pulled automatically if missing. If you ever change that model, run `silo-kb reindex --full` —
+embeddings from different models aren't comparable.
 
-## What happens automatically in Claude Code sessions
+## Automatic session behavior
 
-- **Session start**: a truncated knowledge index is injected into the agent's context
-  (knowledge/projects entries survive truncation first).
-- **On writes**: a hook validates frontmatter for `knowledge/` and `projects/` and blocks
-  violations with a correction message.
-- **In-session capture**: agents write to the raw-capture tiers on their own when a moment calls
-  for it — appending to today's daily log (a time-primary log: one `## HH:MM:SS` block per capture
-  pass, categories as `###` subsections) and generating the occasional grounded deep thought.
+- **Session start**: a truncated knowledge index is injected into the agent's context (knowledge/
+  projects entries survive truncation first).
+- **On writes**: a hook validates frontmatter for `knowledge/` and `projects/` and blocks violations
+  with a correction message.
+- **In-session capture**: agents write to the raw-capture tiers on their own when a moment calls for it
+  — appending to today's daily log (a time-primary log: one `## HH:MM:SS` block per capture pass,
+  categories as `###` subsections) and generating the occasional grounded deep thought.
 - **Session end**: a headless extraction pass appends any still-missing categorized notes from the
   session to today's daily log (requires a one-time `claude /login`; writes only to `daily/`).
 - **Slash commands**: `/kb-reindex`, `/kb-query`, `/kb-compile`, `/kb-sync-index`, `/kb-reset`.
@@ -104,6 +107,6 @@ aren't comparable.
 ## Adding a project
 
 Register it in the Projects table in [PROJECTS.md](PROJECTS.md), then create
-`knowledge-base/projects/<name>/` with flat notes (overview, build tooling, testing,
-conventions), an `architecture/` subdirectory (one note per subsystem), and a `concepts/`
-subdirectory for cross-cutting patterns.
+`knowledge-base/projects/<name>/` with flat notes (overview, build tooling, testing, conventions), an
+`architecture/` subdirectory (one note per subsystem), and a `concepts/` subdirectory for cross-cutting
+patterns.
