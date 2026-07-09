@@ -288,6 +288,10 @@
 
           shellHook = ''
             ${pgEnv}
+            # Put the in-repo silo-kb binary on PATH so `silo-kb …` works as a
+            # bare command (silo-init builds it; it is gitignored and rebuilt
+            # from source, not packaged, so source edits are picked up directly).
+            export PATH="$PWD/tools/silo-kb:$PATH"
             # Ollama is portable: ollama-start (run by silo-init) reuses a native
             # macOS app or a NixOS services.ollama if one is already serving on
             # :11434, otherwise it starts the bundled server.
