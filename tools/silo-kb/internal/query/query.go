@@ -38,6 +38,7 @@ with vec as (
   join notes n on n.id = c.note_id,
   websearch_to_tsquery('english', $2) q
   where c.fts @@ q and ($3 = '' or n.project = $3)
+  order by r
   limit $5
 )
 -- Reciprocal Rank Fusion: the two legs are summed with equal weight (no

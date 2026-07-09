@@ -17,7 +17,7 @@ import (
 
 type queryArgs struct {
 	Text    string `json:"text" jsonschema:"natural-language search text"`
-	Project string `json:"project,omitempty" jsonschema:"optional project filter (projects/<name>)"`
+	Project string `json:"project,omitempty" jsonschema:"optional project filter: the bare project name, i.e. <name> for notes under projects/<name>/"`
 	TopK    int    `json:"top_k,omitempty" jsonschema:"number of results, default 8"`
 }
 

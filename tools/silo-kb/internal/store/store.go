@@ -4,18 +4,21 @@ package store
 
 import (
 	"context"
+	"crypto/sha1"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	pgxvec "github.com/pgvector/pgvector-go/pgx"
 	"github.com/pgvector/pgvector-go"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
 	"silo.local/silo-kb/internal/chunk"
 	"silo.local/silo-kb/internal/vault"
@@ -39,14 +42,9 @@ func DSN() (string, error) {
 	for {
 		pgdata := filepath.Join(dir, ".pg-data")
 		if st, err := os.Stat(pgdata); err == nil && st.IsDir() {
-			sock := pgdata
-			// Mirror the flake's macOS sun_path-length fallback.
-			if len(sock) > 90 {
-				tmp := os.Getenv("TMPDIR")
-				if tmp == "" {
-					tmp = "/tmp"
-				}
-				sock = filepath.Join(tmp, fmt.Sprintf("silokb-%x", hashString(dir)))
+			sock, err := sockDir(dir, pgdata)
+			if err != nil {
+				return "", err
 			}
 			return "postgres:///silokb?host=" + url.QueryEscape(sock) + "&port=5433", nil
 		}
@@ -58,13 +56,26 @@ func DSN() (string, error) {
 	}
 }
 
-func hashString(s string) uint32 {
-	var h uint32 = 2166136261
-	for i := 0; i < len(s); i++ {
-		h ^= uint32(s[i])
-		h *= 16777619
+// sockDir mirrors the flake's macOS sun_path-length fallback exactly: when the
+// .pg-data path is too long for a Unix socket, the flake persists the actual
+// socket dir to <repo>/.pg-socket-path — read that first, and only if it's
+// missing recompute the same hashed $TMPDIR path pg-start would pick
+// (sha1 of the repo dir, first 12 hex chars).
+func sockDir(repoDir, pgdata string) (string, error) {
+	if len(pgdata) <= 90 {
+		return pgdata, nil
 	}
-	return h
+	if b, err := os.ReadFile(filepath.Join(repoDir, ".pg-socket-path")); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return s, nil
+		}
+	}
+	tmp := os.Getenv("TMPDIR")
+	if tmp == "" {
+		tmp = "/tmp"
+	}
+	sum := sha1.Sum([]byte(repoDir))
+	return filepath.Join(tmp, "silokb-"+hex.EncodeToString(sum[:])[:12]), nil
 }
 
 func Connect(ctx context.Context) (*pgxpool.Pool, error) {
@@ -95,12 +106,12 @@ type Embedder interface {
 }
 
 type ReindexStats struct {
-	Notes         int
-	SkippedNotes  int
-	MovedNotes    int
-	ChunksKept    int
+	Notes          int
+	SkippedNotes   int
+	MovedNotes     int
+	ChunksKept     int
 	ChunksEmbedded int
-	NotesPruned   int64
+	NotesPruned    int64
 }
 
 // Reindex delta-syncs the vault into Postgres in a single transaction: an

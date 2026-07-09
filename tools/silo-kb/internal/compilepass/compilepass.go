@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +22,13 @@ import (
 )
 
 const (
-	reinforceDelta   = 0.1
-	decayDelta       = 0.1
-	staleAfter       = 30 * 24 * time.Hour
-	ancientAfter     = 6 * 30 * 24 * time.Hour
-	stableMinRuns    = 3
-	developingAt     = 0.8
-	stableAt         = 0.9
+	reinforceDelta = 0.1
+	decayDelta     = 0.1
+	staleAfter     = 30 * 24 * time.Hour
+	ancientAfter   = 6 * 30 * 24 * time.Hour
+	stableMinRuns  = 3
+	developingAt   = 0.8
+	stableAt       = 0.9
 )
 
 type Options struct {
@@ -39,14 +40,17 @@ type Options struct {
 }
 
 type Action struct {
-	Kind    string // reinforced | decayed | archived-faded | archived-ancient | falsified | graduated | promoted
-	Note    string // wikilink basename
-	Detail  string
+	Kind   string // reinforced | decayed | archived-faded | archived-ancient | falsified | graduated | promoted
+	Note   string // wikilink basename
+	Detail string
 }
 
 type Report struct {
 	When    time.Time
 	Actions []Action
+	// StableCandidates are live stable notes not graduated this run — the
+	// shortlist an agent may want to --graduate next time. Report-only.
+	StableCandidates []string
 }
 
 func (r *Report) String() string {
@@ -54,10 +58,16 @@ func (r *Report) String() string {
 	fmt.Fprintf(&b, "## %s compile\n", r.When.Format(validate.TimeLayout))
 	if len(r.Actions) == 0 {
 		b.WriteString("- no changes\n")
-		return b.String()
 	}
 	for _, a := range r.Actions {
 		fmt.Fprintf(&b, "- %s: [[%s]] %s\n", a.Kind, a.Note, a.Detail)
+	}
+	if len(r.StableCandidates) > 0 {
+		links := make([]string, len(r.StableCandidates))
+		for i, c := range r.StableCandidates {
+			links[i] = "[[" + c + "]]"
+		}
+		fmt.Fprintf(&b, "- stable, ungraduated (graduation candidates): %s\n", strings.Join(links, ", "))
 	}
 	return b.String()
 }
@@ -82,6 +92,38 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 	falsify := map[string]string{}
 	for k, v := range opts.Falsify {
 		falsify[k] = v
+	}
+
+	// Every requested id/path must resolve to a live knowledge note — a typo
+	// silently doing nothing would let the agent report work that never
+	// happened. Checked up front, before any write.
+	live := map[string]bool{}
+	for _, n := range notes {
+		if n.Tier == vault.TierKnowledge && !strings.HasPrefix(n.Path, "knowledge/archive/") {
+			live[n.ID()] = true
+			live[n.Path] = true
+		}
+	}
+	var unknown []string
+	for k := range reinforce {
+		if !live[k] {
+			unknown = append(unknown, "--reinforce "+k)
+		}
+	}
+	for k := range graduate {
+		if !live[k] {
+			unknown = append(unknown, "--graduate "+k)
+		}
+	}
+	for k := range falsify {
+		if !live[k] {
+			unknown = append(unknown, "--falsify "+k)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, fmt.Errorf("no live knowledge note matches:\n  %s\n(ids/paths must name a note under knowledge/ outside archive/)",
+			strings.Join(unknown, "\n  "))
 	}
 
 	report := &Report{When: opts.Now}
@@ -180,7 +222,10 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			}
 			continue
 		}
-		if age, ok := gitAge(repoRoot, filepath.Join("knowledge-base", n.Path), opts.Now); ok && age > ancientAfter {
+		// Reinforcement this run shields a note from ancient-archival: git age
+		// lags until the rewrite is committed, and a note the agent just
+		// re-confirmed is by definition not abandoned.
+		if age, ok := gitAge(repoRoot, filepath.Join("knowledge-base", n.Path), opts.Now); !reinforced && ok && age > ancientAfter {
 			dest := filepath.Join("knowledge/archive", filepath.Base(n.Path))
 			report.Actions = append(report.Actions, Action{"archived-ancient", name,
 				fmt.Sprintf("(last commit %s ago)", age.Round(24*time.Hour))})
@@ -197,8 +242,10 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			if maturity != "stable" {
 				return nil, fmt.Errorf("%s: refusing to graduate non-stable note (maturity %s)", n.Path, maturity)
 			}
-			if !strings.HasPrefix(dest, "projects/") {
-				return nil, fmt.Errorf("%s: graduation destination must be under projects/, got %s", n.Path, dest)
+			// Depth matters: the indexer only sees projects/<name>/<note>.md —
+			// a note directly under projects/ would silently vanish from search.
+			if parts := strings.Split(dest, "/"); len(parts) < 3 || parts[0] != "projects" {
+				return nil, fmt.Errorf("%s: graduation destination must be projects/<name>/<note>.md, got %s", n.Path, dest)
 			}
 			report.Actions = append(report.Actions, Action{"graduated", name, "→ " + dest})
 			if !opts.DryRun {
@@ -215,10 +262,16 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 					return nil, err
 				}
 			}
+			continue
+		}
+
+		// Still live and stable: surface as a graduation candidate for the
+		// agent driving the next run.
+		if maturity == "stable" {
+			report.StableCandidates = append(report.StableCandidates, name)
 		}
 	}
 
-	// Stable candidates the agent may want to graduate next time.
 	if !opts.DryRun {
 		if err := appendLog(vaultRoot, report); err != nil {
 			return nil, err

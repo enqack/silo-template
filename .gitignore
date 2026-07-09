@@ -15,3 +15,5 @@ tools/silo-kb/silo-kb
 
 # local-only claude settings
 .claude/settings.local.json
+# session-end extractor's serialization lock (runtime state)
+.claude/hooks/.extract.lock/

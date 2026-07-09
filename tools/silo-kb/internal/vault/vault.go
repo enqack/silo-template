@@ -123,7 +123,9 @@ func IsReserved(relPath string) bool {
 }
 
 // Walk parses and validates every indexable note under root (the
-// knowledge-base directory). Reserved files (index.md/log.md) and non-markdown
+// knowledge-base directory). Reserved files (index.md/log.md) are validated
+// against their own contract (root index.md carries exactly okf_version, every
+// other one no frontmatter) but excluded from the returned notes; non-markdown
 // files are skipped. Validation failures across all files are aggregated into
 // the returned error so one run reports everything.
 func Walk(root string) ([]*Note, error) {
@@ -143,6 +145,18 @@ func Walk(root string) ([]*Note, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if IsReserved(rel) {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			n, err := ParseNote(rel, content)
+			if err != nil {
+				problems = append(problems, err.Error())
+				return nil
+			}
+			for _, e := range validate.Note(rel, n.Frontmatter, n.Frontmatter != nil) {
+				problems = append(problems, fmt.Sprintf("%s: %s", rel, e))
+			}
 			return nil
 		}
 		if _, _, ok := TierOf(rel); !ok {

@@ -209,9 +209,12 @@ func compileCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&reinforce, "reinforce", nil, "note ids or vault-relative paths confirmed by this run")
-	cmd.Flags().StringSliceVar(&graduate, "graduate", nil, "<id-or-path>:<projects/dest.md> — move a stable article to canon")
-	cmd.Flags().StringSliceVar(&falsify, "falsify", nil, "<id-or-path>=<reason> — archive a theory determined false (records dissent, not decay)")
+	cmd.Flags().StringSliceVar(&reinforce, "reinforce", nil, "note ids or vault-relative paths confirmed by this run (comma-separated or repeated)")
+	// StringArrayVar, not StringSliceVar: destinations and reasons are free
+	// text — a comma inside a reason must not split the value. Repeat the flag
+	// for multiple notes.
+	cmd.Flags().StringArrayVar(&graduate, "graduate", nil, "<id-or-path>:<projects/name/dest.md> — move a stable article to canon (repeatable)")
+	cmd.Flags().StringArrayVar(&falsify, "falsify", nil, "<id-or-path>=<reason> — archive a theory determined false (records dissent, not decay; repeatable)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report without writing")
 	return cmd
 }
@@ -297,12 +300,31 @@ func validateCmd() *cobra.Command {
 type hookInput struct {
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
-		FilePath  string `json:"file_path"`
-		Content   string `json:"content"`
-		OldString string `json:"old_string"`
-		NewString string `json:"new_string"`
+		FilePath   string     `json:"file_path"`
+		Content    string     `json:"content"`
+		OldString  string     `json:"old_string"`
+		NewString  string     `json:"new_string"`
+		ReplaceAll bool       `json:"replace_all"`
+		Edits      []hookEdit `json:"edits"` // MultiEdit
 	} `json:"tool_input"`
 	CWD string `json:"cwd"`
+}
+
+type hookEdit struct {
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all"`
+}
+
+// applyEdit mirrors the Edit tool's semantics on the current file content.
+func applyEdit(current string, e hookEdit) string {
+	if e.OldString == "" {
+		return current
+	}
+	if e.ReplaceAll {
+		return strings.ReplaceAll(current, e.OldString, e.NewString)
+	}
+	return strings.Replace(current, e.OldString, e.NewString, 1)
 }
 
 // runHook validates a pending Write/Edit against the frontmatter contract.
@@ -329,9 +351,13 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	// The generated index is off-limits regardless of content.
+	// The generated/append-only files are off-limits regardless of content.
 	if rel == "knowledge/index.md" {
 		fmt.Fprintln(os.Stderr, "knowledge-base/knowledge/index.md is generated — do not hand-edit it; run /kb-sync-index (silo-kb sync-index) instead")
+		os.Exit(2)
+	}
+	if rel == "knowledge/log.md" {
+		fmt.Fprintln(os.Stderr, "knowledge-base/knowledge/log.md is the compilation audit trail, appended only by silo-kb compile — do not hand-edit it")
 		os.Exit(2)
 	}
 
@@ -340,7 +366,7 @@ func runHook() {
 	switch in.ToolName {
 	case "Write":
 		content = []byte(in.ToolInput.Content)
-	case "Edit", "MultiEdit":
+	case "Edit":
 		current, err := os.ReadFile(path)
 		if err != nil {
 			os.Exit(0) // new file via Edit shouldn't happen; fail open
@@ -348,7 +374,24 @@ func runHook() {
 		if in.ToolInput.OldString == "" {
 			os.Exit(0)
 		}
-		content = []byte(strings.Replace(string(current), in.ToolInput.OldString, in.ToolInput.NewString, 1))
+		content = []byte(applyEdit(string(current), hookEdit{
+			OldString:  in.ToolInput.OldString,
+			NewString:  in.ToolInput.NewString,
+			ReplaceAll: in.ToolInput.ReplaceAll,
+		}))
+	case "MultiEdit":
+		current, err := os.ReadFile(path)
+		if err != nil {
+			os.Exit(0)
+		}
+		if len(in.ToolInput.Edits) == 0 {
+			os.Exit(0)
+		}
+		s := string(current)
+		for _, e := range in.ToolInput.Edits {
+			s = applyEdit(s, e)
+		}
+		content = []byte(s)
 	default:
 		os.Exit(0)
 	}

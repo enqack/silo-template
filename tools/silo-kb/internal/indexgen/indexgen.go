@@ -103,10 +103,11 @@ func projectLine(n *vault.Note) string {
 
 var checkboxRe = regexp.MustCompile(`(?m)^\s*- \[ \]`)
 
-// dailyLine synthesizes a counts-only digest from the log's h2 category
-// sections — a structural scan, no LLM. If a log stops being categorized the
-// digest degrades to a bare entry count: that's the tell that the extractor's
-// output format needs tightening.
+// dailyLine synthesizes a counts-only digest from the log's h3 category
+// subsections (inside the time-primary `## HH:MM:SS` blocks) — a structural
+// scan, no LLM. If a log stops being categorized the digest degrades to a bare
+// entry count: that's the tell that the extractor's output format needs
+// tightening.
 func dailyLine(n *vault.Note) string {
 	name := wikiname(n.Path)
 	counts := categoryCounts(n.Body)

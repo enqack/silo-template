@@ -45,7 +45,7 @@ not a dependency.
   not by directory; add a subdirectory when it earns its keep, not speculatively):
   - `concepts/` — reusable patterns, principles, and techniques (working-theory articles).
   - `cursed-knowledge/` — surprising gotchas, i.e. things you wish you didn't have to know. This is
-    the durable home for the `## Cursed Knowledge` entries the session-end extractor
+    the durable home for the `### Cursed Knowledge` entries the session-end extractor
     (`.claude/hooks/session-end-extract.sh`) collects into daily logs; graduate the ones worth
     keeping into an article here.
   - `lessons-learned/` — postmortem reflections: what worked, what didn't, and why. Authored
@@ -81,11 +81,16 @@ source of truth; Postgres is a derived, droppable index (`silo-kb reindex --full
   dated by its frontmatter and `# <date>` h1).
 
 Lifecycle (run via `/kb-compile`): reinforcement +0.1 (explicit, agent-justified), decay −0.1 when
-stale >30 days, confidence ≤ 0 → `knowledge/archive/faded/`, git-age >6 months → `knowledge/archive/`,
-and stable articles graduate — move, not copy — into `projects/<project>/`, dropping decay fields.
-Falsification (`--falsify <id>=<reason>`, explicit and agent-justified) is a separate, active path: a
-theory judged false is moved to `knowledge/archive/falsified/` with `status: falsified` and its reason
-recorded — it wins over reinforce/decay, so being wrong is distinguished from being forgotten.
+stale >30 days, confidence ≤ 0 → `knowledge/archive/faded/`, git-age >6 months → `knowledge/archive/`
+(a note reinforced in the same run is shielded from ancient-archival). Maturity promotes only on
+reinforcement: `seed`→`developing` at confidence ≥0.8; `developing`→`stable` at ≥0.9 with
+`reinforce_count` ≥3. Graduation is explicit like reinforcement (`--graduate
+<id>:projects/<project>/<note>.md` — the destination must be inside a project subdirectory; the
+indexer never sees notes directly under `projects/`): a stable article moves — not copies — into
+canon, dropping decay fields. Falsification (`--falsify <id>=<reason>`, explicit and
+agent-justified) is a separate, active path: a theory judged false is moved to
+`knowledge/archive/falsified/` with `status: falsified` and its reason recorded — it wins over
+reinforce/decay, so being wrong is distinguished from being forgotten.
 
 ### Autonomous capture (agent-initiated)
 
@@ -137,6 +142,8 @@ reindex — `silo-kb reindex --full` — since old and new embeddings aren't com
 | `silo-kb compile [--dry-run] [--reinforce …] [--falsify …] [--graduate …]` | knowledge lifecycle run |
 | `silo-kb sync-index` | regenerate `knowledge-base/knowledge/index.md` |
 | `silo-kb inject-index --budget N` | truncated index for SessionStart injection |
+| `silo-kb validate` | check the whole vault against the frontmatter contract (also the PreToolUse/pre-commit gate) |
+| `silo-kb migrate` | apply the derived-index schema idempotently (reindex runs it automatically) |
 | `silo-kb serve-mcp` | stdio MCP server (`query_knowledge`) |
 
 Slash commands: `/kb-reindex`, `/kb-query`, `/kb-compile`, `/kb-sync-index`, `/kb-reset`.

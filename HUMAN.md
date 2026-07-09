@@ -26,15 +26,20 @@ The signal is the directory: if a note lives under `projects/`, it's asserted; u
 Run via `/kb-compile` in Claude Code (or `silo-kb compile` by hand). Each run:
 
 - **Reinforces** articles the agent explicitly justifies (+0.1 confidence, capped at 1.0).
-  Mere mention doesn't count; nothing is inferred.
+  Mere mention doesn't count; nothing is inferred. Reinforcement is also what promotes
+  maturity: `seed`→`developing` at confidence ≥0.8, `developing`→`stable` at ≥0.9 with at
+  least 3 reinforcements — promotion never happens on decay or by hand-editing.
 - **Decays** articles untouched for >30 days (−0.1 per run).
 - **Falsifies** on demand (`--falsify <id>=<reason>`): a theory judged outright false is moved to
   `knowledge/archive/falsified/` with its reason recorded — being wrong is logged, not left to
   fade. (For a note you contest but haven't disproven, set `status: disputed` and leave it live.)
 - **Archives** faded articles (confidence ≤ 0 → `knowledge/archive/faded/`) and ancient ones
-  (no git commit in 6 months → `knowledge/archive/`).
-- **Graduates** stable, sustained-confidence articles into `projects/` — moved, not copied,
-  decay fields stripped, provenance (`sources:`) kept.
+  (no git commit in 6 months → `knowledge/archive/`; a note reinforced in the same run is
+  exempt).
+- **Graduates** on demand (`--graduate <id>:projects/<name>/<note>.md` — explicit and
+  agent-justified, like reinforcement; only `stable` notes qualify): the article moves — not
+  copies — into `projects/`, decay fields stripped, provenance (`sources:`) kept. Each run
+  also lists the stable, ungraduated notes as candidates for next time.
 
 Every run appends to `knowledge-base/knowledge/log.md` — that's your audit trail. `git log`
 plus that file explains why any note changed, moved, or vanished.

@@ -1,6 +1,8 @@
 // Package chunk splits notes into embeddable chunks. Granularity is
 // tier-specific: knowledge/* and projects/* split at h2 boundaries, daily logs
-// split at their h2 category sections, deep-thoughts are one chunk per file.
+// split at their `## HH:MM:SS` capture blocks (the h2s of the time-primary
+// format; categories are h3 subsections inside them), deep-thoughts are one
+// chunk per file.
 // Chunk identity is positional (Ordinal) so duplicate headings can't corrupt
 // the delta diff; content hashes make the delta reindex cheap for append-only
 // daily logs.

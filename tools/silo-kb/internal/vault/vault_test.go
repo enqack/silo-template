@@ -9,11 +9,11 @@ import (
 
 func TestSplitFrontmatter(t *testing.T) {
 	cases := []struct {
-		name       string
-		in         string
-		wantFM     string
-		wantBody   string
-		wantHasFM  bool
+		name      string
+		in        string
+		wantFM    string
+		wantBody  string
+		wantHasFM bool
 	}{
 		{"with fm", "---\nid: x\n---\nbody\n", "id: x", "body\n", true},
 		{"no fm", "just body\n", "", "just body\n", false},
@@ -53,15 +53,13 @@ func TestTierOf(t *testing.T) {
 }
 
 // TestWalkRealVault walks the repo's actual knowledge-base as a fixture: the
-// seed vault must always validate.
+// vault must always validate. A freshly reset vault has zero notes — that's
+// legal; the invariant is a clean walk, not a minimum census.
 func TestWalkRealVault(t *testing.T) {
 	root := findVault(t)
 	notes, err := Walk(root)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
-	}
-	if len(notes) < 4 {
-		t.Fatalf("expected at least 4 seed notes, got %d", len(notes))
 	}
 	ids := map[string]string{}
 	for _, n := range notes {
@@ -99,6 +97,55 @@ func TestWalkRejectsContractViolations(t *testing.T) {
 			t.Errorf("error should mention %s; got:\n%v", want, err)
 		}
 	}
+}
+
+// Reserved files are excluded from the returned notes but still validated:
+// the root index.md carries exactly okf_version, every other index.md/log.md
+// carries no frontmatter at all.
+func TestWalkValidatesReservedFiles(t *testing.T) {
+	must := func(t *testing.T, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	newVault := func(t *testing.T) string {
+		dir := t.TempDir()
+		must(t, os.MkdirAll(filepath.Join(dir, "knowledge"), 0o755))
+		return dir
+	}
+
+	t.Run("valid reserved files pass and are not returned", func(t *testing.T) {
+		dir := newVault(t)
+		must(t, os.WriteFile(filepath.Join(dir, "index.md"),
+			[]byte("---\nokf_version: \"0.1\"\n---\n\n# KB\n"), 0o644))
+		must(t, os.WriteFile(filepath.Join(dir, "knowledge/log.md"),
+			[]byte("# Compilation Log\n"), 0o644))
+		notes, err := Walk(dir)
+		if err != nil {
+			t.Fatalf("Walk: %v", err)
+		}
+		if len(notes) != 0 {
+			t.Errorf("reserved files must not be returned as notes, got %d", len(notes))
+		}
+	})
+
+	t.Run("root index.md without okf_version fails", func(t *testing.T) {
+		dir := newVault(t)
+		must(t, os.WriteFile(filepath.Join(dir, "index.md"), []byte("# KB, no frontmatter\n"), 0o644))
+		if _, err := Walk(dir); err == nil || !strings.Contains(err.Error(), "okf_version") {
+			t.Errorf("expected okf_version violation, got %v", err)
+		}
+	})
+
+	t.Run("log.md with frontmatter fails", func(t *testing.T) {
+		dir := newVault(t)
+		must(t, os.WriteFile(filepath.Join(dir, "knowledge/log.md"),
+			[]byte("---\ntype: log\n---\n\n# Log\n"), 0o644))
+		if _, err := Walk(dir); err == nil || !strings.Contains(err.Error(), "reserved filename") {
+			t.Errorf("expected reserved-filename violation, got %v", err)
+		}
+	})
 }
 
 func findVault(t *testing.T) string {

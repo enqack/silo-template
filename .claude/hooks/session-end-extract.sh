@@ -34,9 +34,14 @@ command -v claude >/dev/null || exit 0
 # (Requires a one-time `claude /login` on this machine for headless use.)
 unset ANTHROPIC_BASE_URL ANTHROPIC_API_KEY CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID
 
-# Serialize concurrent session ends appending to the same daily log.
+# Serialize concurrent session ends appending to the same daily log. A lock
+# left behind by a crashed run (trap never fired) must not disable extraction
+# forever: treat a lock older than 30 minutes as stale and take it over.
 LOCK="$ROOT/.claude/hooks/.extract.lock"
-mkdir "$LOCK" 2>/dev/null || exit 0
+if ! mkdir "$LOCK" 2>/dev/null; then
+  find "$LOCK" -maxdepth 0 -type d -mmin +30 -exec rmdir {} \; 2>/dev/null
+  mkdir "$LOCK" 2>/dev/null || exit 0
+fi
 trap 'rmdir "$LOCK"' EXIT
 
 TODAY="$(date +%F)"

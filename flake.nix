@@ -6,7 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
@@ -265,11 +265,12 @@
 
           silo-kb       reindex [--full]                  delta-sync vault → postgres
                         query "text" [--project P]        hybrid semantic+keyword search
-                        compile [--dry-run] [--reinforce …] [--graduate …]
-                                                          knowledge lifecycle: reinforce/decay/archive/graduate
+                        compile [--dry-run] [--reinforce …] [--falsify …] [--graduate …]
+                                                          knowledge lifecycle: reinforce/decay/falsify/archive/graduate
                         sync-index                        regenerate knowledge/index.md
                         inject-index --budget N           truncated index for session start
                         validate                          check vault frontmatter contract
+                        reset --force                     wipe vault to the fresh scaffold (destructive; git is the net)
                         serve-mcp                         stdio MCP server (query_knowledge)
 
           claude code   /kb-reindex /kb-query /kb-compile /kb-sync-index /kb-reset
