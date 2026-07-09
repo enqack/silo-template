@@ -1,8 +1,9 @@
-// Package scaffold writes the fresh-silo knowledge-base/ skeleton: the empty
-// vault layout a brand-new silo starts from. It is the canonical Go owner of
-// that layout; `silo-kb reset` uses it to restore a clean template.
+// Package scaffold writes the fresh-silo skeleton: the empty knowledge-base/
+// vault layout a brand-new silo starts from, plus the repo-root PROJECTS.md
+// registry. It is the canonical Go owner of that layout; `silo-kb reset` uses
+// it to restore a clean template.
 //
-// IMPORTANT: the directory set and the three template files below must stay
+// IMPORTANT: the directory set and the template files below must stay
 // byte-for-byte in sync with the `silo-init` scaffold heredocs in flake.nix
 // (the bootstrap-time copy, used before this binary exists on a fresh silo).
 package scaffold
@@ -35,6 +36,9 @@ var knowledgeIndex []byte
 //go:embed templates/knowledge-log.md
 var knowledgeLog []byte
 
+//go:embed templates/projects.md
+var projectsRegistry []byte
+
 // files maps a vault-relative path to its scaffold content.
 var files = map[string][]byte{
 	"index.md":           rootIndex,
@@ -42,10 +46,11 @@ var files = map[string][]byte{
 	"knowledge/log.md":   knowledgeLog,
 }
 
-// Write lays down the fresh knowledge-base/ skeleton under repoRoot: the tier
-// directories (each with a .gitkeep) and the three reserved files. It assumes
-// knowledge-base/ does not already exist (reset removes it first); MkdirAll is
-// idempotent, but existing authored files are not touched.
+// Write lays down the fresh skeleton under repoRoot: the knowledge-base/ tier
+// directories (each with a .gitkeep) and reserved files, plus the repo-root
+// PROJECTS.md registry. It assumes knowledge-base/ does not already exist (reset
+// removes it first). PROJECTS.md is overwritten unconditionally — that is what
+// makes `silo-kb reset` restore the empty registry.
 func Write(repoRoot string) error {
 	vr := filepath.Join(repoRoot, "knowledge-base")
 	for _, d := range tierDirs {
@@ -62,5 +67,5 @@ func Write(repoRoot string) error {
 			return err
 		}
 	}
-	return nil
+	return os.WriteFile(filepath.Join(repoRoot, "PROJECTS.md"), projectsRegistry, 0o644)
 }

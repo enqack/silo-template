@@ -8,10 +8,9 @@ This is a Multi-Project Silo - a coordination center for independent agentic pro
 
 ### Projects
 
-| Project | Location | Description | Remote Repository (Git) |
-|---------|----------|-------------|-------------------------|
-| silo-kb | `tools/silo-kb/` | Knowledge-base tooling: derived Postgres index, decay engine, MCP server | — |
-
+The projects coordinated in this silo are registered in [PROJECTS.md](PROJECTS.md) — consult it for
+the current list, locations, and remotes, and add a row there when onboarding a project. (`silo-kb
+reset` restores `PROJECTS.md` to its empty template along with the vault.)
 
 ## Knowledge base
 

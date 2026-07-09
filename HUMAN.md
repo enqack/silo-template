@@ -98,7 +98,7 @@ aren't comparable.
 
 ## Adding a project
 
-Register it in the Projects table in `CLAUDE.md`, then create
+Register it in the Projects table in [PROJECTS.md](PROJECTS.md), then create
 `knowledge-base/projects/<name>/` with flat notes (overview, build tooling, testing,
 conventions), an `architecture/` subdirectory (one note per subsystem), and a `concepts/`
 subdirectory for cross-cutting patterns.

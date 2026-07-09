@@ -18,6 +18,7 @@ silo-template/
 ├── tools/silo-kb/         # Go tooling: derived Postgres index, lifecycle engine, MCP server
 ├── workspace/             # scratch area for project checkouts and working files
 ├── flake.nix              # Nix dev environment: auto-bootstraps and auto-starts the silo
+├── PROJECTS.md            # registry of the projects this silo coordinates
 ├── CLAUDE.md              # the operating contract for AI agents
 └── HUMAN.md               # the same contract, summarized for the human operator
 ```
@@ -60,5 +61,5 @@ server. Day-to-day operation is documented in [HUMAN.md](HUMAN.md); the agent-fa
 
 1. Copy or clone this repository under a new name.
 2. `nix develop` — `silo-init` scaffolds anything missing and starts the stack.
-3. Register your projects in the table in `CLAUDE.md` and add
+3. Register your projects in the table in [PROJECTS.md](PROJECTS.md) and add
    `knowledge-base/projects/<name>/` notes as they earn documentation.

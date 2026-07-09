@@ -43,6 +43,13 @@ func TestWriteCreatesFreshScaffold(t *testing.T) {
 		}
 	}
 
+	// The repo-root PROJECTS.md registry is written with its heading.
+	if b, err := os.ReadFile(filepath.Join(root, "PROJECTS.md")); err != nil {
+		t.Errorf("missing PROJECTS.md: %v", err)
+	} else if !strings.HasPrefix(string(b), "# PROJECTS") {
+		t.Errorf("PROJECTS.md content = %q…, want prefix %q", string(b[:min(len(b), 40)]), "# PROJECTS")
+	}
+
 	// The clean-slate invariant: a walk of the fresh scaffold yields no notes
 	// (index.md/log.md are reserved and skipped).
 	notes, err := vault.Walk(vr)
@@ -51,5 +58,24 @@ func TestWriteCreatesFreshScaffold(t *testing.T) {
 	}
 	if len(notes) != 0 {
 		t.Errorf("fresh scaffold walked %d notes, want 0", len(notes))
+	}
+}
+
+// Write overwrites an existing populated PROJECTS.md — that is the reset.
+func TestWriteResetsPopulatedProjects(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "PROJECTS.md")
+	if err := os.WriteFile(projects, []byte("# PROJECTS\n\n| foo | bar | baz | qux |\n"), 0o644); err != nil {
+		t.Fatalf("seed PROJECTS.md: %v", err)
+	}
+	if err := Write(root); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	b, err := os.ReadFile(projects)
+	if err != nil {
+		t.Fatalf("read PROJECTS.md: %v", err)
+	}
+	if strings.Contains(string(b), "foo") {
+		t.Errorf("PROJECTS.md still contains the seeded row after reset:\n%s", b)
 	}
 }

@@ -3,9 +3,9 @@ description: Wipe the knowledge base back to the fresh-silo scaffold and rebuild
 ---
 
 **Destructive.** This deletes every note in `knowledge-base/` — all of `daily/`,
-`deep-thoughts/`, `knowledge/**`, and `projects/**` — and restores the empty template
-scaffold, then rebuilds the derived index. Git is the only recovery net, so make sure
-anything worth keeping is committed first.
+`deep-thoughts/`, `knowledge/**`, and `projects/**` — restores the empty template scaffold
+(including resetting the repo-root `PROJECTS.md` registry), then rebuilds the derived index.
+Git is the only recovery net, so make sure anything worth keeping is committed first.
 
 Confirm the user actually wants to wipe the vault, then build the tool and reset:
 

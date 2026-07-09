@@ -2,21 +2,3 @@
 
 # Knowledge Index
 
-## Knowledge
-
-- [[deep-thoughts-craft]] `concept` seed·0.7
-- [[postgres-derived-index]] `concept` seed·0.7
-
-## Projects
-
-- [[overview]] `overview` → projects/silo-kb/overview.md
-
-## Daily
-
-- [[2026-07-07]] `daily` — 3 concepts, 1 cursed knowledge, 1 log, 2 environment, 2 unresolved
-
-## Deep Thoughts
-
-- [[2026-07-07-09-15-derived-truth]] `deep-thought`
-- [[2026-07-09-11-19-agent-initiated-capture]] `deep-thought`
-

@@ -126,11 +126,11 @@
             ${pkgs.git}/bin/git config core.hooksPath .githooks
           fi
 
-          # 2. Vault scaffold (fresh silo only — a template clone ships one).
-          # Keep this byte-for-byte in sync with tools/silo-kb/internal/scaffold
-          # (the Go copy used by `silo-kb reset`).
+          # 2. Vault + PROJECTS.md scaffold (fresh silo only — a template clone
+          # ships them). Keep this byte-for-byte in sync with
+          # tools/silo-kb/internal/scaffold (the Go copy used by `silo-kb reset`).
           if [ ! -d knowledge-base ]; then
-            say "scaffolding knowledge-base/ (fresh silo)"
+            say "scaffolding knowledge-base/ + PROJECTS.md (fresh silo)"
             mkdir -p knowledge-base/daily knowledge-base/deep-thoughts \
               knowledge-base/knowledge/concepts knowledge-base/knowledge/cursed-knowledge \
               knowledge-base/knowledge/lessons-learned \
@@ -169,6 +169,16 @@
           <!-- Appended by silo-kb compile — audit trail of compilation runs. Do not hand-edit. -->
 
           # Compilation Log
+          EOF
+            cat > PROJECTS.md <<'EOF'
+          # PROJECTS
+
+          Registry of the independent projects coordinated in this silo. Add one row per project as it is
+          onboarded; each project lives in its own repository and earns documentation under
+          `knowledge-base/projects/<name>/`.
+
+          | Project | Location | Description | Remote Repository (Git) |
+          |---------|----------|-------------|-------------------------|
           EOF
           fi
 
