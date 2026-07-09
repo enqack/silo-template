@@ -50,9 +50,11 @@ nix develop        # bootstraps everything: git, vault, build, Postgres, model, 
 ```
 
 The shell banner shows live status (✓/✗) and the full command reference; reprint it any time
-with `silo-help`. Requirements: Nix (flakes enabled) and a local [Ollama](https://ollama.com)
-for embeddings. Day-to-day operation is documented in [HUMAN.md](HUMAN.md); the agent-facing
-contract is [CLAUDE.md](CLAUDE.md).
+with `silo-help`. The only requirement is Nix (flakes enabled) — the dev shell bundles everything
+else, including [Ollama](https://ollama.com) for embeddings. If you already run a native Ollama (the
+macOS app for Metal, or a NixOS `services.ollama`), the bootstrap reuses it instead of the bundled
+server. Day-to-day operation is documented in [HUMAN.md](HUMAN.md); the agent-facing contract is
+[CLAUDE.md](CLAUDE.md).
 
 ## Starting a new silo from this template
 

@@ -2,6 +2,9 @@
 .pg-data/
 # persisted socket dir for deep repo paths (machine-local, stable across reboots)
 .pg-socket-path
+# bundled ollama server runtime state (machine-local)
+.ollama-serve.log
+.ollama-serve.pid
 
 # nix / direnv
 .direnv/

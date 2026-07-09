@@ -68,6 +68,46 @@
           echo "dropped $SILOKB_PGDATA"
         '';
 
+        # Portable Ollama lifecycle. Prefer whatever is already serving on
+        # :11434 — a native macOS app (Metal) or a NixOS services.ollama — and
+        # only fall back to the bundled server. Same commands on both platforms.
+        # Models live in the default ~/.ollama (shared with a native install).
+        ollama-start = pkgs.writeShellScriptBin "ollama-start" ''
+          set -uo pipefail
+          if ${ollamaUp} >/dev/null 2>&1; then
+            echo "ollama already up (native app or system service)"
+            exit 0
+          fi
+          nohup ${pkgs.ollama}/bin/ollama serve >"$PWD/.ollama-serve.log" 2>&1 &
+          echo $! > "$PWD/.ollama-serve.pid"
+          n=0
+          while [ "$n" -lt 50 ]; do
+            if ${ollamaUp} >/dev/null 2>&1; then
+              echo "ollama up (bundled server, pid $(cat "$PWD/.ollama-serve.pid"))"
+              exit 0
+            fi
+            sleep 0.2
+            n=$((n + 1))
+          done
+          echo "ollama failed to start within 10s — see .ollama-serve.log" >&2
+          exit 1
+        '';
+
+        # Stops only a server this repo started via ollama-start; a native app
+        # or system service is left alone.
+        ollama-stop = pkgs.writeShellScriptBin "ollama-stop" ''
+          set -uo pipefail
+          PIDFILE="$PWD/.ollama-serve.pid"
+          if [ -f "$PIDFILE" ]; then
+            PID="$(cat "$PIDFILE")"
+            kill "$PID" 2>/dev/null && echo "stopped bundled ollama (pid $PID)" \
+              || echo "bundled ollama (pid $PID) was not running"
+            rm -f "$PIDFILE"
+          else
+            echo "nothing to stop — ollama-start launched no bundled server (a native app/service is managed on its own)"
+          fi
+        '';
+
         # Idempotent full bootstrap: safe to run on every shell entry — each
         # step checks before acting, and no failure aborts the shell.
         silo-init = pkgs.writeShellScriptBin "silo-init" ''
@@ -86,7 +126,9 @@
             ${pkgs.git}/bin/git config core.hooksPath .githooks
           fi
 
-          # 2. Vault scaffold (fresh silo only — a template clone ships one)
+          # 2. Vault scaffold (fresh silo only — a template clone ships one).
+          # Keep this byte-for-byte in sync with tools/silo-kb/internal/scaffold
+          # (the Go copy used by `silo-kb reset`).
           if [ ! -d knowledge-base ]; then
             say "scaffolding knowledge-base/ (fresh silo)"
             mkdir -p knowledge-base/daily knowledge-base/deep-thoughts \
@@ -138,19 +180,19 @@
           # 4. Postgres
           ${pg-start}/bin/pg-start >/dev/null || warn "postgres failed to start — see .pg-data/log"
 
-          # 5. Ollama + embedding model
+          # 5. Ollama + embedding model. Portable across NixOS/macOS: reuse a
+          #    server already up (native app / services.ollama), else start the
+          #    bundled one.
           OLLAMA_OK=0
-          if TAGS="$(${ollamaUp} 2>/dev/null)"; then
+          if ${ollama-start}/bin/ollama-start >&2 && TAGS="$(${ollamaUp} 2>/dev/null)"; then
             if echo "$TAGS" | grep -q 'nomic-embed-text:v1.5'; then
               OLLAMA_OK=1
-            elif command -v ollama >/dev/null; then
-              say "pulling nomic-embed-text:v1.5 (one-time, ~270 MB)"
-              ollama pull nomic-embed-text:v1.5 >&2 && OLLAMA_OK=1 || warn "model pull failed"
             else
-              warn "ollama server is up but the ollama CLI is not on PATH — run: ollama pull nomic-embed-text:v1.5"
+              say "pulling nomic-embed-text:v1.5 (one-time, ~270 MB)"
+              ${pkgs.ollama}/bin/ollama pull nomic-embed-text:v1.5 >&2 && OLLAMA_OK=1 || warn "model pull failed"
             fi
           else
-            warn "ollama not answering on :11434 — start it, then rerun silo-init (reindex skipped)"
+            warn "ollama unavailable — embeddings skipped (start it, then rerun silo-init)"
           fi
 
           # 6. Derived index
@@ -206,6 +248,7 @@
           cat <<'EOF'
 
           environment   pg-start | pg-stop | pg-nuke      postgres lifecycle (index is droppable)
+                        ollama-start | ollama-stop        embedding server (reuses a native/system ollama if up)
                         silo-init                         idempotent bootstrap (runs on shell entry)
                         silo-help                         reprint this banner
                         SILOKB_NO_AUTOSTART=1             skip auto-start on nix develop
@@ -219,7 +262,7 @@
                         validate                          check vault frontmatter contract
                         serve-mcp                         stdio MCP server (query_knowledge)
 
-          claude code   /kb-reindex /kb-query /kb-compile /kb-sync-index
+          claude code   /kb-reindex /kb-query /kb-compile /kb-sync-index /kb-reset
 
           invariants    knowledge-base/ markdown is the single source of truth — pg-nuke is always safe;
                         rebuild with: pg-start && silo-kb reindex --full
@@ -233,16 +276,21 @@
             pkgs.go
             pg
             pkgs.git
+            pkgs.ollama
             pg-start
             pg-stop
             pg-nuke
+            ollama-start
+            ollama-stop
             silo-init
             silo-help
           ];
 
           shellHook = ''
             ${pgEnv}
-            # Ollama runs natively on macOS (Metal); on NixOS use services.ollama.
+            # Ollama is portable: ollama-start (run by silo-init) reuses a native
+            # macOS app or a NixOS services.ollama if one is already serving on
+            # :11434, otherwise it starts the bundled server.
             if [ -z "''${SILOKB_NO_AUTOSTART:-}" ]; then
               ${silo-init}/bin/silo-init
             fi

@@ -72,10 +72,14 @@ silo-help                   # reprint the banner
 silo-kb query "…"           # hybrid semantic+keyword search over the whole vault
 silo-kb compile --dry-run   # preview a lifecycle run before letting it write
 pg-stop / pg-nuke           # stop or drop the (always rebuildable) index
+ollama-start / ollama-stop  # start/stop the embedding server (see below)
 SILOKB_NO_AUTOSTART=1       # env var: enter the shell without the bootstrap
 ```
 
-Needs local Ollama running with `nomic-embed-text:v1.5` (the bootstrap pulls it if missing).
+Ollama is bundled in the dev shell, so nothing extra to install. `ollama-start` (run by the
+bootstrap) reuses a server already listening on `:11434` — a native macOS app for Metal, or a
+NixOS `services.ollama` — and only starts the bundled server as a fallback; `ollama-stop` stops
+only a server it started. The model is `nomic-embed-text:v1.5`, pulled automatically if missing.
 If you ever change that model, run `silo-kb reindex --full` — embeddings from different models
 aren't comparable.
 
@@ -85,9 +89,12 @@ aren't comparable.
   (knowledge/projects entries survive truncation first).
 - **On writes**: a hook validates frontmatter for `knowledge/` and `projects/` and blocks
   violations with a correction message.
-- **Session end**: a headless extraction pass appends categorized notes from the session to
-  today's daily log (requires a one-time `claude /login`; writes only to `daily/`).
-- **Slash commands**: `/kb-reindex`, `/kb-query`, `/kb-compile`, `/kb-sync-index`.
+- **In-session capture**: agents write to the raw-capture tiers on their own when a moment calls
+  for it — appending to today's daily log (a time-primary log: one `## HH:MM:SS` block per capture
+  pass, categories as `###` subsections) and generating the occasional grounded deep thought.
+- **Session end**: a headless extraction pass appends any still-missing categorized notes from the
+  session to today's daily log (requires a one-time `claude /login`; writes only to `daily/`).
+- **Slash commands**: `/kb-reindex`, `/kb-query`, `/kb-compile`, `/kb-sync-index`, `/kb-reset`.
 
 ## Adding a project
 

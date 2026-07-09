@@ -14,6 +14,7 @@ import (
 	"silo.local/silo-kb/internal/indexgen"
 	"silo.local/silo-kb/internal/mcpserver"
 	"silo.local/silo-kb/internal/query"
+	"silo.local/silo-kb/internal/scaffold"
 	"silo.local/silo-kb/internal/store"
 	"silo.local/silo-kb/internal/validate"
 	"silo.local/silo-kb/internal/vault"
@@ -78,6 +79,57 @@ func reindexCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "truncate the index and rebuild everything")
+	return cmd
+}
+
+func resetCmd() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "reset",
+		Short: "Wipe the vault back to the fresh-silo scaffold and rebuild the index",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !force {
+				return fmt.Errorf("reset deletes every note in knowledge-base/ — re-run with --force (git is your recovery net)")
+			}
+			root, err := findRepoRoot()
+			if err != nil {
+				return err
+			}
+			vr := filepath.Join(root, "knowledge-base")
+			if err := os.RemoveAll(vr); err != nil {
+				return fmt.Errorf("wiping %s: %w", vr, err)
+			}
+			if err := scaffold.Write(root); err != nil {
+				return err
+			}
+			fmt.Println("vault reset to the fresh-silo scaffold")
+
+			// Rebuild the derived index so Postgres matches the now-empty tree.
+			// The scaffold has no walkable notes, so this just truncates. If the
+			// DB is unreachable the wipe still stands — report and exit clean.
+			ctx := cmd.Context()
+			pool, err := store.Connect(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "vault reset, but index not rebuilt (%v) — run: pg-start && silo-kb reindex --full\n", err)
+				return nil
+			}
+			defer pool.Close()
+			notes, err := vault.Walk(vr)
+			if err != nil {
+				return err
+			}
+			if _, err := store.Reindex(ctx, pool, embed.New(""), notes, true); err != nil {
+				fmt.Fprintf(os.Stderr, "vault reset, but reindex failed (%v) — run: silo-kb reindex --full\n", err)
+				return nil
+			}
+			if err := indexgen.Write(vr); err != nil {
+				return err
+			}
+			fmt.Println("index rebuilt; knowledge/index.md regenerated")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "required — confirm wiping the vault back to the scaffold")
 	return cmd
 }
 

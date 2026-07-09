@@ -133,22 +133,35 @@ type catCount struct {
 	items    int
 }
 
-var h2Re = regexp.MustCompile(`(?m)^## (.+)$`)
+// headingRe matches h2/h3 headings; group 1 is the hashes, group 2 the text.
+var headingRe = regexp.MustCompile(`(?m)^(#{2,3}) (.+)$`)
 var bulletRe = regexp.MustCompile(`(?m)^- `)
 
+// categoryCounts tallies bullets per category over the time-primary daily
+// structure: each capture pass is a `## <time>` block whose `### <Category>`
+// subsections hold the bullets. Counts are summed per category across every
+// block (a category may recur in later passes), preserving first-seen order.
+// The `## <time>` block headings are not categories and are skipped.
 func categoryCounts(body string) []catCount {
-	locs := h2Re.FindAllStringSubmatchIndex(body, -1)
+	locs := headingRe.FindAllStringSubmatchIndex(body, -1)
+	idx := map[string]int{} // category name -> position in out
 	var out []catCount
 	for i, loc := range locs {
+		if loc[3]-loc[2] != 3 {
+			continue // only ### subsections are categories
+		}
 		end := len(body)
 		if i+1 < len(locs) {
-			end = locs[i+1][0]
+			end = locs[i+1][0] // section runs to the next h2/h3 heading
 		}
-		sectionBody := body[loc[1]:end]
-		out = append(out, catCount{
-			category: body[loc[2]:loc[3]],
-			items:    len(bulletRe.FindAllString(sectionBody, -1)),
-		})
+		category := body[loc[4]:loc[5]]
+		n := len(bulletRe.FindAllString(body[loc[1]:end], -1))
+		if p, ok := idx[category]; ok {
+			out[p].items += n
+			continue
+		}
+		idx[category] = len(out)
+		out = append(out, catCount{category: category, items: n})
 	}
 	return out
 }

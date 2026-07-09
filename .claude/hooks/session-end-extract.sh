@@ -41,6 +41,7 @@ trap 'rmdir "$LOCK"' EXIT
 
 TODAY="$(date +%F)"
 NOW="$(date '+%Y-%m-%d %H:%M:%S')"
+NOWTIME="$(date '+%H:%M:%S')"
 DAILY="knowledge-base/daily/$TODAY.md"
 
 cd "$ROOT" || exit 0
@@ -49,17 +50,23 @@ claude -p --model haiku --allowedTools "Read Write Edit Bash(uuidgen:*)" -- "
 You are the knowledge extractor for this silo. Read the session transcript at
 $TRANSCRIPT (it is JSONL; skim user/assistant messages, skip tool noise).
 
-Distill durable knowledge from the session and append it to $DAILY:
+Distill durable knowledge from the session and append it to $DAILY. The daily
+log is TIME-PRIMARY: each capture pass is a '## HH:MM:SS' block, and the
+categories are '###' subsections inside it.
 - If the file does not exist, create it with YAML frontmatter: a fresh lowercase
   UUID as 'id' (run uuidgen), 'type: daily-log', 'title: $TODAY',
   'timestamp: $NOW', then an h1 '# $TODAY'.
-- Append bullet entries under these h2 category sections, creating a section
-  only when you have entries for it (reuse existing sections if present):
-  '## Concepts', '## Cursed Knowledge', '## Unresolved', '## Log'.
+- The file may ALREADY contain '## <time>' blocks the agent captured in-session.
+  Read it first and only ADD durable items that are genuinely missing — never
+  duplicate or reword an entry already present under any block. If everything
+  durable is already captured, write nothing and finish.
+- Append your findings as ONE new block headed '## $NOWTIME'. Inside it, add
+  only the '###' category subsections you have entries for:
+  '### Concepts', '### Cursed Knowledge', '### Unresolved', '### Log'.
 - Concepts: durable ideas/decisions worth remembering. Cursed Knowledge:
   surprising gotchas. Unresolved: open questions as '- [ ]' checkboxes.
   Log: one-line summary of what the session did.
-- Categorized bullets only — no freeform prose outside sections. Never edit
+- Categorized bullets only — no freeform prose outside subsections. Never edit
   any file other than $DAILY. If the session contained nothing durable, write
   nothing and finish.
 " >/dev/null

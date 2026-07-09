@@ -77,7 +77,9 @@ source of truth; Postgres is a derived, droppable index (`silo-kb reindex --full
   notes — never reassigned). Moves (graduation, archival) keep the `id`; the index keys on it.
 - `knowledge/index.md` is GENERATED (`silo-kb sync-index`) — never hand-edit it.
 - `knowledge/log.md` is the compilation audit trail — appended by `silo-kb compile` only.
-- Timestamps are formatted `YYYY-MM-DD HH:MM:SS` (local time) everywhere they appear.
+- Timestamps are formatted `YYYY-MM-DD HH:MM:SS` (local time) everywhere a full timestamp appears —
+  except daily-log capture-batch block headings, which are time-only `## HH:MM:SS` (the file is already
+  dated by its frontmatter and `# <date>` h1).
 
 Lifecycle (run via `/kb-compile`): reinforcement +0.1 (explicit, agent-justified), decay −0.1 when
 stale >30 days, confidence ≤ 0 → `knowledge/archive/faded/`, git-age >6 months → `knowledge/archive/`,
@@ -86,24 +88,56 @@ Falsification (`--falsify <id>=<reason>`, explicit and agent-justified) is a sep
 theory judged false is moved to `knowledge/archive/falsified/` with `status: falsified` and its reason
 recorded — it wins over reinforce/decay, so being wrong is distinguished from being forgotten.
 
+### Autonomous capture (agent-initiated)
+
+The two raw-capture tiers are meant to be **written by the agent when a situation calls for one**, not
+supplied by the operator. Don't wait to be asked.
+
+- **Daily log — capture in-session.** As durable material surfaces during a session, append it to
+  `knowledge-base/daily/YYYY-MM-DD.md` (today's date). The log is **time-primary**: each capture pass
+  is its own `## HH:MM:SS` block (local time, from `date "+%H:%M:%S"` — time-only, the file is already
+  dated), and the categories are `###` subsections *inside* that block, created only when you have
+  entries for them: `### Concepts` (durable ideas/decisions), `### Cursed Knowledge` (surprising
+  gotchas), `### Unresolved` (open questions as `- [ ]` checkboxes), `### Log` (one-line summaries of
+  what was done). Categorized bullets only — no freeform prose. Append-only: reuse the current pass's
+  `## <time>` block while you're still in that pass; a later capture moment appends a new `## <time>`
+  block. If the file doesn't exist, create it with frontmatter — a fresh lowercase `uuidgen` `id`,
+  `type: daily-log`, `title: <date>`, `timestamp: YYYY-MM-DD HH:MM:SS` — then an h1 `# <date>`, then
+  the first `## <time>` block. This is raw capture — never graduate directly into `knowledge/` or
+  `projects/` (that stays a deliberate `/kb-compile` act). The `SessionEnd` hook
+  (`session-end-extract.sh`) remains a backstop for anything you miss, so in-session capture need not
+  be exhaustive — capture what's clearly durable as you go.
+- **Deep thoughts — generate at notable moments (moderate cadence).** When a session hits a notable
+  milestone or a vivid moment of friction or triumph, invoke the `deep-thoughts` skill to write a
+  grounded Jack Handey–style reflection. Multiple per session are fine; don't force one when nothing
+  notable happened. The `/deep-thoughts` command still works for explicit requests.
+- **Deep-thought output convention (this silo overrides the skill's default).** In this vault, deep
+  thoughts go to `knowledge-base/deep-thoughts/YYYY-MM-DD-HH-MM-{slug}.md` with OKF frontmatter
+  (`id` via `uuidgen`, `type: deep-thought`, `title`, `timestamp: YYYY-MM-DD HH:MM:SS`) matching the
+  existing notes there — **not** the skill's default `logs/deep-thoughts/` path or its frontmatter-less
+  format.
+
 ### Knowledge tooling (silo-kb)
 
 Dev environment: `nix develop` auto-starts the silo — the shellHook runs `silo-init` (idempotent
 full bootstrap: git init, vault scaffold for a fresh silo, Go build, Postgres via `pg-start`,
-Ollama model check/pull, reindex + sync-index) and then prints a status/command banner via
-`silo-help`. Set `SILOKB_NO_AUTOSTART=1` to skip the bootstrap; `pg-start`/`pg-stop`/`pg-nuke`
-manage Postgres directly; DSN is exported as `SILOKB_DSN`. Embeddings come from local Ollama
-(`nomic-embed-text:v1.5`, version-pinned). Changing the embedding model (or its tag) requires a full
+Ollama via `ollama-start` + model pull, reindex + sync-index) and then prints a status/command banner
+via `silo-help`. Set `SILOKB_NO_AUTOSTART=1` to skip the bootstrap; `pg-start`/`pg-stop`/`pg-nuke`
+manage Postgres directly; `ollama-start`/`ollama-stop` manage the embedding server. Ollama is bundled
+(`pkgs.ollama`) but portable: `ollama-start` reuses a server already listening on `:11434` — a native
+macOS app (Metal) or a NixOS `services.ollama` — and only starts the bundled one as a fallback. DSN is
+exported as `SILOKB_DSN`. Embeddings come from local Ollama (`nomic-embed-text:v1.5`, version-pinned). Changing the embedding model (or its tag) requires a full
 reindex — `silo-kb reindex --full` — since old and new embeddings aren't comparable. Manual build:
 `cd tools/silo-kb && go build -o silo-kb .`
 
 | Command | Purpose |
 |---|---|
 | `silo-kb reindex [--full]` | delta-sync the vault into Postgres (chunks + embeddings) |
+| `silo-kb reset --force` | wipe the vault back to the fresh-silo scaffold, then rebuild the index (destructive; git is the recovery net) |
 | `silo-kb query "text" [--project P] [--top-k N]` | hybrid RRF retrieval |
 | `silo-kb compile [--dry-run] [--reinforce …] [--falsify …] [--graduate …]` | knowledge lifecycle run |
 | `silo-kb sync-index` | regenerate `knowledge-base/knowledge/index.md` |
 | `silo-kb inject-index --budget N` | truncated index for SessionStart injection |
 | `silo-kb serve-mcp` | stdio MCP server (`query_knowledge`) |
 
-Slash commands: `/kb-reindex`, `/kb-query`, `/kb-compile`, `/kb-sync-index`.
+Slash commands: `/kb-reindex`, `/kb-query`, `/kb-compile`, `/kb-sync-index`, `/kb-reset`.

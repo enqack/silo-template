@@ -39,6 +39,7 @@ func main() {
 	root.AddCommand(
 		migrateCmd(),
 		reindexCmd(),
+		resetCmd(),
 		queryCmd(),
 		compileCmd(),
 		syncIndexCmd(),

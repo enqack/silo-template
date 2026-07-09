@@ -18,4 +18,5 @@
 ## Deep Thoughts
 
 - [[2026-07-07-09-15-derived-truth]] `deep-thought`
+- [[2026-07-09-11-19-agent-initiated-capture]] `deep-thought`
 
