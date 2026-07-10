@@ -17,3 +17,7 @@ tools/silo-kb/silo-kb
 .claude/settings.local.json
 # session-end extractor's serialization lock (runtime state)
 .claude/hooks/.extract.lock/
+
+# IDEs
+.idea/
+.vscode/

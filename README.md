@@ -42,8 +42,9 @@ The design enforces an honest split across three stances:
   the lifecycle. If it's there, it's asserted, not hypothesized.
 - **Raw capture** (`daily/`, `deep-thoughts/`) is the provenance trail both tiers cite.
 
-The markdown tree is the **single source of truth**. Postgres (pgvector + full-text) is a derived
-search index — droppable at any time (`pg-nuke`) and rebuilt from the working tree in one command. If
+The markdown tree is the **single source of truth**. Postgres (pgvector + full-text, plus a link graph
+derived from wikilinks and `sources:` provenance) is a derived search index — droppable at any time
+(`pg-nuke`) and rebuilt from the working tree in one command. If
 the database ever disagrees with the markdown, the database is wrong. This is also why the agents can't
 harm your knowledge through the database: they retrieve through a **read-only** MCP tool
 (`query_knowledge`) and never write Postgres directly, and the index is disposable — everything durable
@@ -75,8 +76,10 @@ including [Ollama](https://ollama.com) for embeddings. If you already run a nati
 for Metal, or a NixOS `services.ollama`), the bootstrap reuses it instead of the bundled server.
 
 **Retrieval:** every note is chunked, embedded locally (Ollama, `nomic-embed-text:v1.5`), and indexed
-for hybrid search — semantic similarity and keyword rank fused with reciprocal rank fusion
-(equal-weighted). Agents reach it through an MCP tool (`query_knowledge`); humans through
+for hybrid search — three legs fused with reciprocal rank fusion: semantic similarity and keyword rank
+as the equal-weighted primary signals, plus a lower-weighted graph leg that expands one hop along
+wikilink/provenance edges to surface linked-but-weak notes. Falsified (retired-but-retained) notes are
+excluded by default. Agents reach it through an MCP tool (`query_knowledge`); humans through
 `silo-kb query "…"`. Day-to-day commands are in [HUMAN.md](HUMAN.md).
 
 ## Automatic session behavior
