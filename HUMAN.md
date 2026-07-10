@@ -1,8 +1,11 @@
 # HUMAN.md
 
-The operator's digest of [CLAUDE.md](CLAUDE.md) — what the agents are contractually doing in this silo,
-and what you need to know to work alongside them. See [README.md](README.md) for the big picture. All
-three docs share the section order below, so any section here maps onto the same section there.
+The operator's digest — what the agents are contractually doing in this silo, and what you need to know
+to work alongside them. The exact mechanics (layout, lifecycle thresholds, the frontmatter contract)
+are defined once in **[SILO_MECHANICS.md](SILO_MECHANICS.md)**; this file gives you the operator's
+stance on them rather than restating the numbers, so you and the agents never tune against different
+values. See [CLAUDE.md](CLAUDE.md) for the agent contract and [README.md](README.md) for the big
+picture.
 
 ## What this is
 
@@ -17,59 +20,38 @@ run.
 The **one rule that explains everything else:** `knowledge-base/` (markdown) is the single source of
 truth. Postgres is a derived search index — `pg-nuke` is always safe, and
 `pg-start && silo-kb reindex --full` rebuilds it entirely from the working tree. Never treat the
-database as authoritative.
+database as authoritative. And you needn't fear the agents corrupting it: they read through a read-only
+MCP tool and never write Postgres directly, and even a destructive command (`pg-nuke`, `silo-kb reset
+--force`) only touches the derived index and the working tree, both recoverable from git.
 
-The vault is four directories in three stances:
-
-| Tier | Path | What it is | Your stance |
-|---|---|---|---|
-| Raw capture | `daily/`, `deep-thoughts/` | Append-only session logs and one-off reflections | Read for provenance; rarely edit |
-| Working theory | `knowledge/` | Hypotheses with a confidence score that decays | Challenge freely — it's meant to be wrong sometimes |
-| Asserted canon | `projects/` | Settled per-project documentation | Trust it; changing it is a deliberate act |
-
-The signal is the directory: if a note lives under `projects/`, it's asserted; under `knowledge/`, it's
-hypothesized at the confidence its frontmatter states. Within `knowledge/`, notes are filed by kind —
-`concepts/` (reusable patterns/principles), `cursed-knowledge/` (surprising gotchas — the durable home
-for daily `### Cursed Knowledge` capture), and `lessons-learned/` (authored postmortems). These folders
-are for your benefit; retrieval and the index key off frontmatter, not the folder.
+The vault is four directories in three stances — raw capture (`daily/`, `deep-thoughts/`: read for
+provenance, rarely edit), working theory (`knowledge/`: challenge freely, it's meant to be wrong
+sometimes), and asserted canon (`projects/`: trust it, changing it is deliberate). The signal is the
+directory. The full layout, tier semantics, and `knowledge/` subdirectory conventions are in
+**[SILO_MECHANICS.md § Layout & tiers](SILO_MECHANICS.md#layout--tiers)**.
 
 ## The lifecycle
 
-Run via `/kb-compile` in Claude Code (or `silo-kb compile` by hand). Each run:
-
-- **Reinforces** articles the agent explicitly justifies (+0.1 confidence, capped at 1.0). Mere mention
-  doesn't count; nothing is inferred. Reinforcement is also what promotes maturity: `seed`→`developing`
-  at confidence ≥0.8, `developing`→`stable` at ≥0.9 with at least 3 reinforcements — promotion never
-  happens on decay or by hand-editing.
-- **Decays** articles untouched for >30 days (−0.1 per run).
-- **Falsifies** on demand (`--falsify <id>=<reason>`): a theory judged outright false is moved to
-  `knowledge/archive/falsified/` with its reason recorded — being wrong is logged, not left to fade.
-  (For a note you contest but haven't disproven, set `status: disputed` and leave it live.)
-- **Archives** faded articles (confidence ≤ 0 → `knowledge/archive/faded/`) and ancient ones (no git
-  commit in 6 months → `knowledge/archive/`; a note reinforced in the same run is exempt).
-- **Graduates** on demand (`--graduate <id>:projects/<name>/<note>.md` — explicit and agent-justified,
-  like reinforcement; only `stable` notes qualify): the article moves — not copies — into `projects/`,
-  decay fields stripped, provenance (`sources:`) kept. Each run also lists the stable, ungraduated
-  notes as candidates for next time.
-
-Every run appends to `knowledge-base/knowledge/log.md` — that's your audit trail. `git log` plus that
-file explains why any note changed, moved, or vanished.
+On each `/kb-compile` run, articles are reinforced, decay, get falsified, are archived, and graduate
+into canon — the thresholds and exact rules live in
+**[SILO_MECHANICS.md § The lifecycle](SILO_MECHANICS.md#the-lifecycle)**. What matters for you:
+reinforcement, falsification, and graduation are **agent-justified** acts (they don't happen by mention
+or on a timer), decay and archival are automatic, and every run appends to
+`knowledge-base/knowledge/log.md` — your audit trail. `git log` plus that file explains why any note
+changed, moved, or vanished. If you decide to tune a threshold, change it in SILO_MECHANICS.md so the
+agents read the same number you do.
 
 ## The frontmatter contract
 
-Every note except `index.md`/`log.md` needs `id` (a UUID, assigned once, never reused — moves keep it)
-and `type`. Notes under `knowledge/` additionally need `confidence` (0–1), `maturity`
-(`seed`/`developing`/`stable`), `last_reinforced`, `reinforce_count`, and a non-empty `sources` list.
-Notes under `projects/` must **not** carry those decay fields. Timestamps are `YYYY-MM-DD HH:MM:SS`
-local time. Wikilinks (`[[note]]`) for vault-internal links; plain relative markdown links for real
-repo files. (The frontmatter contract in [CLAUDE.md](CLAUDE.md) is the exhaustive version.)
-
-**Two files you must never hand-edit:** `knowledge-base/knowledge/index.md` (generated by `silo-kb
-sync-index`) and `knowledge-base/knowledge/log.md` (appended only by `silo-kb compile`). A hook blocks
-agents from editing these and from writing notes with broken frontmatter; the same contract applies to
-you. That agent-side hook only fires inside Claude Code, so a tracked git pre-commit hook
-(`.githooks/pre-commit`, wired by `silo-init` via `core.hooksPath`) runs the *same* validator on `git
-commit` and rejects the commit on any violation — `git commit --no-verify` bypasses it in an emergency.
+Every note carries YAML frontmatter — a stable `id` and `type`, plus decay fields under `knowledge/`
+that canon notes must not have — enforced automatically. The exhaustive contract is in
+**[SILO_MECHANICS.md § The frontmatter contract](SILO_MECHANICS.md#the-frontmatter-contract)**. The one
+thing to internalize as operator: **never hand-edit** `knowledge-base/knowledge/index.md` (generated by
+`silo-kb sync-index`) or `knowledge-base/knowledge/log.md` (appended only by `silo-kb compile`). A hook
+blocks agents from editing these and from writing broken frontmatter; the same contract applies to you,
+and a tracked git pre-commit hook (`.githooks/pre-commit`, wired by `silo-init` via `core.hooksPath`)
+runs the *same* validator on `git commit` and rejects the commit on any violation — `git commit
+--no-verify` bypasses it in an emergency.
 
 ## Tooling & commands
 

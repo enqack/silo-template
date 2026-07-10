@@ -5,8 +5,9 @@ codebase, but a workspace where a human operator and AI agents (Claude Code) sha
 projects, working theories, settled decisions, and the tooling to search all of it. This repository is
 the template; clone or copy it to start a new silo, run `nix develop`, and everything bootstraps itself.
 
-This README is the newcomer's orientation. [HUMAN.md](HUMAN.md) is the operator's day-to-day digest and
-[CLAUDE.md](CLAUDE.md) is the agent-facing contract; all three share the section order below.
+This README is the newcomer's orientation. [HUMAN.md](HUMAN.md) is the operator's day-to-day digest,
+[CLAUDE.md](CLAUDE.md) is the agent-facing contract, and [SILO_MECHANICS.md](SILO_MECHANICS.md) is the
+single source of truth for the mechanics all of them rely on (layout, lifecycle, frontmatter contract).
 
 ## What this is
 
@@ -24,11 +25,13 @@ silo-template/
 │   ├── knowledge/         # working theory: mutable articles with confidence that decays
 │   └── projects/          # asserted canon: durable per-project documentation, never decays
 ├── tools/silo-kb/         # Go tooling: derived Postgres index, lifecycle engine, MCP server
+├── prompts/               # creative prompt files kept out of the operating contract (e.g. deep-thoughts persona)
 ├── workspace/             # scratch area for project checkouts and working files
 ├── flake.nix              # Nix dev environment: auto-bootstraps and auto-starts the silo
 ├── PROJECTS.md            # registry of the projects this silo coordinates
+├── SILO_MECHANICS.md      # single source of truth for the mechanics (layout, lifecycle, frontmatter)
 ├── CLAUDE.md              # the operating contract for AI agents
-└── HUMAN.md               # the same contract, summarized for the human operator
+└── HUMAN.md               # the operator's digest for the human
 ```
 
 The design enforces an honest split across three stances:
@@ -41,21 +44,24 @@ The design enforces an honest split across three stances:
 
 The markdown tree is the **single source of truth**. Postgres (pgvector + full-text) is a derived
 search index — droppable at any time (`pg-nuke`) and rebuilt from the working tree in one command. If
-the database ever disagrees with the markdown, the database is wrong.
+the database ever disagrees with the markdown, the database is wrong. This is also why the agents can't
+harm your knowledge through the database: they retrieve through a **read-only** MCP tool
+(`query_knowledge`) and never write Postgres directly, and the index is disposable — everything durable
+lives in version-controlled markdown.
 
 ## The lifecycle
 
 Knowledge here has a **lifecycle**. Theories are reinforced when re-confirmed and decay when ignored;
 ones that fade to zero are archived, and ones that prove stable **graduate** into project canon. Canon
 never decays. The full mechanics (thresholds, maturity promotion, falsification) live in
-[HUMAN.md](HUMAN.md) and [CLAUDE.md](CLAUDE.md).
+[SILO_MECHANICS.md](SILO_MECHANICS.md).
 
 ## The frontmatter contract
 
 Every note carries YAML frontmatter with a stable `id` and a `type`; working-theory notes add
 confidence/maturity fields that canon notes must not have. A validator (a write-time hook and a git
-pre-commit gate) enforces it. See [HUMAN.md](HUMAN.md) for the operator summary and
-[CLAUDE.md](CLAUDE.md) for the exhaustive contract.
+pre-commit gate) enforces it. See [SILO_MECHANICS.md](SILO_MECHANICS.md) for the exhaustive contract
+and [HUMAN.md](HUMAN.md) for the operator summary.
 
 ## Tooling & commands
 
