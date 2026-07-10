@@ -68,7 +68,7 @@ func TestKnowledgeContract(t *testing.T) {
 }
 
 func TestKnowledgeStatus(t *testing.T) {
-	for _, s := range []string{"active", "disputed"} {
+	for _, s := range []string{"active", "disputed", "paused"} {
 		fm := validKnowledgeFM()
 		fm["status"] = s
 		if errs := Note("knowledge/concepts/x.md", fm, true); len(errs) != 0 {
@@ -84,6 +84,20 @@ func TestKnowledgeStatus(t *testing.T) {
 	fm["status"] = "bogus"
 	if errs := Note("knowledge/concepts/x.md", fm, true); len(errs) == 0 {
 		t.Error("unknown status should fail")
+	}
+}
+
+func TestDeepThoughtRequiresDescription(t *testing.T) {
+	base := map[string]any{
+		"id":   "de6d5441-c97e-415f-b5ca-0df850ff0d84",
+		"type": "deep-thought",
+	}
+	if errs := Note("deep-thoughts/2026-07-07-x.md", base, true); len(errs) == 0 {
+		t.Error("deep-thought without description should fail (its body is not embedded)")
+	}
+	base["description"] = "Refactored the compile lifecycle to add passive citation refresh."
+	if errs := Note("deep-thoughts/2026-07-07-x.md", base, true); len(errs) != 0 {
+		t.Errorf("deep-thought with a factual description should pass: %v", errs)
 	}
 }
 

@@ -171,6 +171,7 @@ func compileCmd() *cobra.Command {
 	var reinforce []string
 	var graduate []string
 	var falsify []string
+	var dispute []string
 	var supersede []string
 	var dryRun bool
 	cmd := &cobra.Command{
@@ -197,6 +198,14 @@ func compileCmd() *cobra.Command {
 				}
 				fals[k] = v
 			}
+			disp := map[string]string{}
+			for _, d := range dispute {
+				k, v, ok := strings.Cut(d, "=")
+				if !ok || strings.TrimSpace(v) == "" {
+					return fmt.Errorf("--dispute wants <id-or-path>=<reason>, got %q", d)
+				}
+				disp[k] = v
+			}
 			sup := map[string]string{}
 			for _, s := range supersede {
 				k, v, ok := strings.Cut(s, ":")
@@ -209,6 +218,7 @@ func compileCmd() *cobra.Command {
 				Reinforce: reinforce,
 				Graduate:  grad,
 				Falsify:   fals,
+				Dispute:   disp,
 				Supersede: sup,
 				DryRun:    dryRun,
 			})
@@ -228,6 +238,7 @@ func compileCmd() *cobra.Command {
 	// for multiple notes.
 	cmd.Flags().StringArrayVar(&graduate, "graduate", nil, "<id-or-path>:<projects/name/dest.md> — move a stable article to canon (repeatable)")
 	cmd.Flags().StringArrayVar(&falsify, "falsify", nil, "<id-or-path>=<reason> — invalidate a theory determined false in place (retained + queryable, records dissent not decay; repeatable)")
+	cmd.Flags().StringArrayVar(&dispute, "dispute", nil, "<id-or-path>=<reason> — contest a theory without disproving it (stays live and decaying; a later reinforce clears it; repeatable)")
 	cmd.Flags().StringArrayVar(&supersede, "supersede", nil, "<falsified-id-or-path>:<replacement-id-or-path> — record what replaced a note falsified this run (repeatable)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report without writing")
 	return cmd

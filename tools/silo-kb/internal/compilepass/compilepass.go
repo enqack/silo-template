@@ -17,6 +17,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"silo.local/silo-kb/internal/links"
 	"silo.local/silo-kb/internal/validate"
 	"silo.local/silo-kb/internal/vault"
 )
@@ -29,19 +30,24 @@ const (
 	stableMinRuns  = 3
 	developingAt   = 0.8
 	stableAt       = 0.9
+	// refreshWithin: a theory cited by a file committed this recently is still in
+	// use, so its decay clock resets without an explicit reinforce (passive
+	// citation-as-provenance refresh).
+	refreshWithin = 7 * 24 * time.Hour
 )
 
 type Options struct {
 	Reinforce []string          // note ids or vault-relative paths
 	Graduate  map[string]string // id (or path) -> vault-relative destination under projects/
 	Falsify   map[string]string // id (or path) -> reason the theory was determined false
+	Dispute   map[string]string // id (or path) -> reason the theory is contested (live, not disproven)
 	Supersede map[string]string // falsified note id (or path) -> replacement note id (or path)
 	DryRun    bool
 	Now       time.Time
 }
 
 type Action struct {
-	Kind   string // reinforced | decayed | archived-faded | archived-ancient | falsified | graduated | promoted
+	Kind   string // reinforced | refreshed | decayed | archived-faded | archived-ancient | falsified | disputed | dispute-cleared | graduated | promoted
 	Note   string // wikilink basename
 	Detail string
 }
@@ -94,6 +100,10 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 	for k, v := range opts.Falsify {
 		falsify[k] = v
 	}
+	dispute := map[string]string{}
+	for k, v := range opts.Dispute {
+		dispute[k] = v
+	}
 	supersede := map[string]string{}
 	for k, v := range opts.Supersede {
 		supersede[k] = v
@@ -136,6 +146,11 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			unknown = append(unknown, "--falsify "+k)
 		}
 	}
+	for k := range dispute {
+		if !live[k] {
+			unknown = append(unknown, "--dispute "+k)
+		}
+	}
 	// Every --supersede must attach to a note being falsified this run, and its
 	// replacement must resolve to a real note.
 	for k, repl := range supersede {
@@ -150,6 +165,69 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		sort.Strings(unknown)
 		return nil, fmt.Errorf("no live knowledge note matches:\n  %s\n(ids/paths must name a note under knowledge/ outside archive/)",
 			strings.Join(unknown, "\n  "))
+	}
+
+	// A single run must not both re-confirm and contest/invalidate the same note:
+	// today falsify silently wins over reinforce by loop order, hiding the
+	// contradiction. Reject it so the invoking agent — which has the context —
+	// decides what it actually means, rather than freezing the note behind a lock.
+	// Keys may be an id or a path, so normalize to id before comparing.
+	idOf := map[string]string{}
+	for _, n := range notes {
+		idOf[n.ID()] = n.ID()
+		idOf[n.Path] = n.ID()
+	}
+	op := map[string][]string{} // note id -> the mutating ops naming it this run
+	for _, m := range []struct {
+		name string
+		keys map[string]bool
+	}{
+		{"reinforce", reinforce},
+		{"falsify", toKeys(falsify)},
+		{"dispute", toKeys(dispute)},
+	} {
+		for k := range m.keys {
+			if id, ok := idOf[k]; ok {
+				op[id] = append(op[id], m.name)
+			}
+		}
+	}
+	var conflicts []string
+	for id, ops := range op {
+		if len(ops) > 1 {
+			sort.Strings(ops)
+			conflicts = append(conflicts, fmt.Sprintf("%s: %s", id, strings.Join(ops, " + ")))
+		}
+	}
+	if len(conflicts) > 0 {
+		sort.Strings(conflicts)
+		return nil, fmt.Errorf("contradictory operations on the same note in one run (pick one):\n  %s",
+			strings.Join(conflicts, "\n  "))
+	}
+
+	// Reverse citation index for passive decay-refresh: a theory still cited by
+	// recently-committed work is being used, so its clock resets even without an
+	// explicit reinforce. Keyed on git commit time (the same signal ancient-
+	// archival trusts) — fs mtime lies after checkouts. Confidence is untouched:
+	// being referenced keeps a note alive; only an agent's reinforce asserts it.
+	idByName := map[string]string{} // wikilink basename -> note id (first wins)
+	for _, n := range notes {
+		name := wikiname(n.Path)
+		if _, ok := idByName[name]; !ok {
+			idByName[name] = n.ID()
+		}
+	}
+	recentlyCited := map[string]bool{} // note id -> cited by a file committed < refreshWithin ago
+	for _, m := range notes {
+		age, ok := gitAge(repoRoot, filepath.Join("knowledge-base", m.Path), opts.Now)
+		if !ok || age > refreshWithin {
+			continue
+		}
+		for _, ref := range links.Targets(m) {
+			if id, ok := idByName[ref.Name]; ok && id != m.ID() {
+				recentlyCited[id] = true
+			}
+		}
 	}
 
 	report := &Report{When: opts.Now}
@@ -199,6 +277,26 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			continue
 		}
 
+		// 0.5. Dispute (explicit, non-terminal). Unlike falsify, a disputed note is
+		// contested but not disproven: it stays live and keeps decaying. This is the
+		// automatic middle ground — no human lock, no frozen fields. A later
+		// reinforce (an agent re-asserting) clears it back to active.
+		if reason, ok := pick(dispute, n.ID(), n.Path); ok {
+			if strings.TrimSpace(reason) == "" {
+				return nil, fmt.Errorf("%s: refusing to dispute without a reason", n.Path)
+			}
+			report.Actions = append(report.Actions, Action{"disputed", name, "(" + reason + ")"})
+			if !opts.DryRun {
+				setFM(n.FMNode, "status", "disputed")
+				setFM(n.FMNode, "disputed_reason", reason)
+				setFM(n.FMNode, "disputed_at", opts.Now.Format(validate.TimeLayout))
+				if err := writeNote(abs, n); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+
 		conf := toFloat(n.Frontmatter["confidence"])
 		count := toInt(n.Frontmatter["reinforce_count"])
 		maturity, _ := n.Frontmatter["maturity"].(string)
@@ -209,6 +307,13 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		lastStr := last.Format(validate.TimeLayout)
 
 		reinforced := reinforce[n.ID()] || reinforce[n.Path]
+		// A paused note (blocked on something external) or one still cited by
+		// recently-committed work is shielded from decay: its clock resets to now
+		// instead of ticking down. Confidence is never *raised* this way — being
+		// referenced keeps a note alive; only an agent's reinforce asserts it.
+		paused := statusOf(n) == "paused"
+		shielded := paused || recentlyCited[n.ID()]
+		clearDispute := false
 		changed := false
 
 		// 1. Reinforce (wins over decay in the same run).
@@ -220,6 +325,11 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			changed = true
 			report.Actions = append(report.Actions, Action{"reinforced", name,
 				fmt.Sprintf("%.1f→%.1f", old, conf)})
+			// An agent re-asserting a contested note resolves the dispute.
+			if statusOf(n) == "disputed" {
+				clearDispute = true
+				report.Actions = append(report.Actions, Action{"dispute-cleared", name, "(reinforced)"})
+			}
 			// Maturity promotions only advance on reinforcement.
 			if maturity == "seed" && conf >= developingAt {
 				maturity = "developing"
@@ -229,12 +339,23 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 				report.Actions = append(report.Actions, Action{"promoted", name, "developing→stable"})
 			}
 		} else if opts.Now.Sub(last) > staleAfter {
-			// 2. Decay.
-			old := conf
-			conf = max(0.0, conf-decayDelta)
-			changed = true
-			report.Actions = append(report.Actions, Action{"decayed", name,
-				fmt.Sprintf("%.1f→%.1f (last_reinforced %s)", old, conf, lastStr)})
+			if shielded {
+				// 2a. Refresh: reset the decay clock without touching confidence.
+				cause := "cited recently"
+				if paused {
+					cause = "paused"
+				}
+				last = opts.Now
+				changed = true
+				report.Actions = append(report.Actions, Action{"refreshed", name, "(" + cause + ")"})
+			} else {
+				// 2b. Decay.
+				old := conf
+				conf = max(0.0, conf-decayDelta)
+				changed = true
+				report.Actions = append(report.Actions, Action{"decayed", name,
+					fmt.Sprintf("%.1f→%.1f (last_reinforced %s)", old, conf, lastStr)})
+			}
 		}
 
 		if changed && !opts.DryRun {
@@ -242,6 +363,11 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			setFM(n.FMNode, "maturity", maturity)
 			setFM(n.FMNode, "last_reinforced", last.Format(validate.TimeLayout))
 			setFM(n.FMNode, "reinforce_count", strconv.Itoa(count))
+			if clearDispute {
+				setFM(n.FMNode, "status", "active")
+				deleteFM(n.FMNode, "disputed_reason")
+				deleteFM(n.FMNode, "disputed_at")
+			}
 			if err := writeNote(abs, n); err != nil {
 				return nil, err
 			}
@@ -261,8 +387,9 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		}
 		// Reinforcement this run shields a note from ancient-archival: git age
 		// lags until the rewrite is committed, and a note the agent just
-		// re-confirmed is by definition not abandoned.
-		if age, ok := gitAge(repoRoot, filepath.Join("knowledge-base", n.Path), opts.Now); !reinforced && ok && age > ancientAfter {
+		// re-confirmed is by definition not abandoned. A paused or recently-cited
+		// note is likewise still in play, not abandoned.
+		if age, ok := gitAge(repoRoot, filepath.Join("knowledge-base", n.Path), opts.Now); !reinforced && !shielded && ok && age > ancientAfter {
 			dest := filepath.Join("knowledge/archive", filepath.Base(n.Path))
 			report.Actions = append(report.Actions, Action{"archived-ancient", name,
 				fmt.Sprintf("(last commit %s ago)", age.Round(24*time.Hour))})
@@ -278,6 +405,15 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		if dest, ok := pick(graduate, n.ID(), n.Path); ok {
 			if maturity != "stable" {
 				return nil, fmt.Errorf("%s: refusing to graduate non-stable note (maturity %s)", n.Path, maturity)
+			}
+			if paused {
+				return nil, fmt.Errorf("%s: refusing to graduate a paused note; unpause it first (status: active)", n.Path)
+			}
+			// Contested theory must not become canon. Resolve the dispute first — a
+			// reinforce clears it automatically — so graduation reflects settled
+			// belief, not an open argument.
+			if statusOf(n) == "disputed" {
+				return nil, fmt.Errorf("%s: refusing to graduate a disputed note; resolve the dispute first (reinforce clears it)", n.Path)
 			}
 			// Depth matters: the indexer only sees projects/<name>/<note>.md —
 			// a note directly under projects/ would silently vanish from search.
@@ -303,8 +439,8 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		}
 
 		// Still live and stable: surface as a graduation candidate for the
-		// agent driving the next run.
-		if maturity == "stable" {
+		// agent driving the next run. A paused note is on hold, not a candidate.
+		if maturity == "stable" && !paused {
 			report.StableCandidates = append(report.StableCandidates, name)
 		}
 	}
@@ -428,6 +564,14 @@ func toSet(xs []string) map[string]bool {
 		if x != "" {
 			s[x] = true
 		}
+	}
+	return s
+}
+
+func toKeys(m map[string]string) map[string]bool {
+	s := map[string]bool{}
+	for k := range m {
+		s[k] = true
 	}
 	return s
 }

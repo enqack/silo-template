@@ -15,9 +15,10 @@ import (
 var maturities = map[string]bool{"seed": true, "developing": true, "stable": true}
 
 // liveStatuses are the truth-states a knowledge note may carry while it is
-// still an asserted belief: absent ⇒ active, or an explicitly contested
-// `disputed`.
-var liveStatuses = map[string]bool{"active": true, "disputed": true}
+// still an asserted belief: absent ⇒ active, an explicitly contested
+// `disputed`, or a `paused` note whose decay clock is suspended while it waits
+// on something external (its confidence is not asserted, just not decaying).
+var liveStatuses = map[string]bool{"active": true, "disputed": true, "paused": true}
 
 // StatusFalsified is retained-but-invalidated: the note stays live in
 // knowledge/ (queryable for as-of/history), frozen against decay, stamped with
@@ -105,6 +106,13 @@ func Note(relPath string, fm map[string]any, hasFM bool) []string {
 				errs = append(errs, fmt.Sprintf("projects/* notes are asserted canon and must not carry decay field `%s`; remove it (graduation should have stripped it)", f))
 			}
 		}
+	case "deep-thoughts":
+		// A deep-thought's body is a comedic Jack-Handey blockquote that must not
+		// pollute the semantic index. The chunker embeds the `description` instead,
+		// so a deep-thought must carry a dry, literal factual summary there.
+		if d, _ := fm["description"].(string); strings.TrimSpace(d) == "" {
+			errs = append(errs, "deep-thought notes require a non-empty plain-text `description`: a dry, literal one-sentence summary of the session event (this is what gets embedded; the comedic body is not indexed)")
+		}
 	}
 	return errs
 }
@@ -159,8 +167,16 @@ func validateKnowledge(fm map[string]any) []string {
 					errs = append(errs, "`superseded_by`, if set, must be a non-empty wikilink")
 				}
 			}
+		case str == "disputed":
+			// `disputed` is live and keeps decaying; the reason/time are optional
+			// audit fields stamped by `compile --dispute`. Validate only their form.
+			if da, present := fm["disputed_at"]; present {
+				if _, err := TimeOf(da); err != nil {
+					errs = append(errs, fmt.Sprintf("`disputed_at` %v", err))
+				}
+			}
 		case !liveStatuses[str]:
-			errs = append(errs, "knowledge/* `status`, if set, must be one of: active, disputed, falsified")
+			errs = append(errs, "knowledge/* `status`, if set, must be one of: active, disputed, paused, falsified")
 		}
 	}
 	return errs

@@ -37,10 +37,13 @@ work:
 
 Knowledge is reinforced, decays, falsifies, archives, and graduates on `/kb-compile` runs — full rules
 and thresholds in **[SILO_MECHANICS.md § The lifecycle](SILO_MECHANICS.md#the-lifecycle)**. Your part
-is the **agent-justified** moves: reinforcement, falsification (`--falsify`), and graduation
-(`--graduate`) only happen when you explicitly justify them — mere mention never counts and nothing is
-inferred. Decay and archival are automatic; you don't hand-edit confidence or maturity, and you never
-touch `knowledge/log.md` (the compile audit trail).
+is the **agent-justified** moves: reinforcement, falsification (`--falsify`), dispute (`--dispute`), and
+graduation (`--graduate`) only happen when you explicitly justify them — mere mention never counts and
+nothing is inferred. Reinforcing and falsifying/disputing the same note in one run is rejected as a
+contradiction (resolve it, don't expect one to silently win), and reinforcing a disputed note clears the
+dispute. Decay and archival are automatic — and a note still cited by recently-committed work is
+refreshed automatically, so you don't need to fake-reinforce to keep live theory alive. You don't
+hand-edit confidence or maturity, and you never touch `knowledge/log.md` (the compile audit trail).
 
 ## The frontmatter contract
 
@@ -82,7 +85,7 @@ administrative CLI command (human- or slash-command-driven, some destructive).
 |---|---|
 | `silo-kb query "text" [--project P] [--top-k N] [--include-falsified]` | hybrid RRF retrieval from the shell (the CLI form of `query_knowledge`) |
 | `silo-kb reindex [--full]` | delta-sync the vault into Postgres (chunks + embeddings + link graph) |
-| `silo-kb compile [--dry-run] [--reinforce …] [--falsify …] [--supersede …] [--graduate …]` | knowledge lifecycle run |
+| `silo-kb compile [--dry-run] [--reinforce …] [--falsify …] [--dispute …] [--supersede …] [--graduate …]` | knowledge lifecycle run |
 | `silo-kb sync-index` | regenerate `knowledge-base/knowledge/index.md` |
 | `silo-kb inject-index --budget N` | truncated index for SessionStart injection |
 | `silo-kb validate` | check the whole vault against the frontmatter contract (also the PreToolUse/pre-commit gate) |
@@ -120,7 +123,11 @@ supplied by the operator. Don't wait to be asked.
   write the file to `knowledge-base/deep-thoughts/YYYY-MM-DD-HH-MM-{slug}.md` (slug = lowercase topic,
   spaces→hyphens, punctuation stripped; timestamps from `date "+%Y-%m-%d-%H-%M"` and
   `date "+%Y-%m-%d %H:%M:%S"`), with OKF frontmatter — `id` via `uuidgen`, `type: deep-thought`,
-  `title`, `timestamp: YYYY-MM-DD HH:MM:SS` — then the thought as a blockquote (Write tool, never echo
+  `title`, `timestamp: YYYY-MM-DD HH:MM:SS`, and a **required `description`**: one dry, literal sentence
+  stating the actual session event (the grounded reflection you already do to write the joke — e.g.
+  "Added passive citation-refresh to the compile lifecycle"). The indexer embeds **only** the
+  `description`, never the comedic body, so this is what makes the note findable; a joke-only file would
+  scatter itself across the vector space. Then write the thought as a blockquote (Write tool, never echo
   or heredoc), and display it to the user with its path. **For the voice**, follow
   [prompts/deep-thoughts-persona.md](prompts/deep-thoughts-persona.md) — the silo's self-contained
   source of truth for the style (no skill required; if the user-level `deep-thoughts` skill is

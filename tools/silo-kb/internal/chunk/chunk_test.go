@@ -21,6 +21,27 @@ func TestDeepThoughtSingleChunk(t *testing.T) {
 	}
 }
 
+func TestDeepThoughtEmbedsDescriptionNotBody(t *testing.T) {
+	n := &vault.Note{
+		Path: "dt.md",
+		Tier: vault.TierDeepThought,
+		Frontmatter: map[string]any{
+			"description": "Refactored the compile lifecycle to add passive citation refresh.",
+		},
+		Body: "> If you drop your keys into a river of molten lava, let 'em go.\n",
+	}
+	chunks := Split(n)
+	if len(chunks) != 1 {
+		t.Fatalf("want 1 chunk, got %d", len(chunks))
+	}
+	if !strings.Contains(chunks[0].Content, "passive citation refresh") {
+		t.Errorf("deep-thought should embed the factual description, got %q", chunks[0].Content)
+	}
+	if strings.Contains(chunks[0].Content, "molten lava") {
+		t.Errorf("comedic body must not be embedded, got %q", chunks[0].Content)
+	}
+}
+
 func TestH2SplitWithHeadingPaths(t *testing.T) {
 	body := `# Title
 

@@ -37,7 +37,20 @@ func Split(n *vault.Note) []Chunk {
 	var raw []section
 	switch n.Tier {
 	case vault.TierDeepThought:
-		raw = []section{{content: strings.TrimSpace(n.Body)}}
+		// A deep-thought's body is a comedic blockquote whose imagery (molten lava,
+		// Chihuahuas) would embed literally and scatter the note across the vector
+		// space. Embed the dry factual `description` instead — the validator
+		// requires it — so the note clusters near the technical events it documents.
+		// The joke stays in the body for humans, unindexed. Fall back to the body
+		// only if a description is somehow absent (validation would have blocked it).
+		text := ""
+		if d, ok := n.Frontmatter["description"].(string); ok {
+			text = strings.TrimSpace(d)
+		}
+		if text == "" {
+			text = strings.TrimSpace(n.Body)
+		}
+		raw = []section{{content: text}}
 	default:
 		raw = splitAtH2(n.Body)
 	}

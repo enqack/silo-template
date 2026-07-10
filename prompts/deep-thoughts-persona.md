@@ -71,6 +71,13 @@ Write the thought itself as a markdown **blockquote**, below the OKF frontmatter
 the file path where it was saved. (The exact directory, filename pattern, and frontmatter fields are
 defined operationally in CLAUDE.md — this file governs only the wording.)
 
+One frontmatter field is load-bearing for the voice to survive: the required **`description`**. It holds
+a dry, literal one-sentence summary of the session event — the same grounding you extract in "Session
+Reflection" above, written completely straight (no joke, no imagery). This is the *only* text the search
+index embeds; the comedic blockquote is kept for humans but never indexed. So the reflection you do to
+earn the joke also becomes the `description` — write it there plainly, then let the blockquote be as
+unhinged as it needs to be.
+
 ## Quality Check (before writing the file)
 
 1. **Gentle Setup** — does it open on a soft, sincere, or poetic premise?

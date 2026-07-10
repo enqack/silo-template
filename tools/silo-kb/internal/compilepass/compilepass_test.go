@@ -129,22 +129,115 @@ func TestFalsifyWithSupersede(t *testing.T) {
 	}
 }
 
-func TestFalsifyWinsOverReinforce(t *testing.T) {
+// Reinforcing and falsifying (or disputing) the same note in one run is a
+// contradiction: falsify used to silently win, hiding it. Now the whole run is
+// rejected so the invoking agent resolves it.
+func TestSameRunContradictionRejected(t *testing.T) {
+	id := "de6d5441-c97e-415f-b5ca-0df850ff0d84"
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local)
+
+	cases := map[string]Options{
+		"reinforce+falsify": {Reinforce: []string{id}, Falsify: map[string]string{id: "wrong"}},
+		"reinforce+dispute": {Reinforce: []string{id}, Dispute: map[string]string{id: "unsure"}},
+		"falsify+dispute":   {Falsify: map[string]string{id: "wrong"}, Dispute: map[string]string{id: "unsure"}},
+	}
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+			writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+			opts.Now = now
+			_, err := Run(repo, opts)
+			if err == nil || !strings.Contains(err.Error(), "contradictory operations") {
+				t.Fatalf("expected a contradiction error, got %v", err)
+			}
+		})
+	}
+}
+
+// --dispute contests a note without disproving it: it stays live (status
+// disputed) with a reason, and is NOT moved or frozen.
+func TestDisputeMarksLiveWithReason(t *testing.T) {
 	repo := t.TempDir()
 	id := "de6d5441-c97e-415f-b5ca-0df850ff0d84"
 	writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
 	writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
 
 	rep, err := Run(repo, Options{
-		Reinforce: []string{id},
-		Falsify:   map[string]string{id: "wrong"},
-		Now:       time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local),
+		Dispute: map[string]string{id: "conflicts with note Y"},
+		Now:     time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Actions) != 1 || rep.Actions[0].Kind != "falsified" {
-		t.Fatalf("falsify should win over reinforce, got %+v", rep.Actions)
+	if len(rep.Actions) != 1 || rep.Actions[0].Kind != "disputed" {
+		t.Fatalf("expected one disputed action, got %+v", rep.Actions)
+	}
+	got, err := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/concepts/theory.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"status: disputed", "disputed_reason: conflicts with note Y", "disputed_at: 2026-07-07 12:00:00"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("disputed note missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
+func TestDisputeRequiresReason(t *testing.T) {
+	repo := t.TempDir()
+	writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+	writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+
+	_, err := Run(repo, Options{
+		Dispute: map[string]string{"de6d5441-c97e-415f-b5ca-0df850ff0d84": "  "},
+		Now:     time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local),
+	})
+	if err == nil {
+		t.Fatal("dispute with blank reason should error")
+	}
+}
+
+// Reinforcing a disputed note (an agent re-asserting it) clears the dispute
+// back to active automatically — no human unlock.
+func TestReinforceClearsDispute(t *testing.T) {
+	repo := t.TempDir()
+	id := "de6d5441-c97e-415f-b5ca-0df850ff0d84"
+	writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+	writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+
+	if _, err := Run(repo, Options{
+		Dispute: map[string]string{id: "unsure"},
+		Now:     time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Run(repo, Options{
+		Reinforce: []string{id},
+		Now:       time.Date(2026, 7, 8, 12, 0, 0, 0, time.Local),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cleared bool
+	for _, a := range rep.Actions {
+		if a.Kind == "dispute-cleared" {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatalf("expected a dispute-cleared action, got %+v", rep.Actions)
+	}
+	got, err := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/concepts/theory.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	if !strings.Contains(s, "status: active") {
+		t.Errorf("reinforced note should be back to active; got:\n%s", s)
+	}
+	if strings.Contains(s, "disputed_reason") || strings.Contains(s, "disputed_at") {
+		t.Errorf("dispute fields should be removed on clear; got:\n%s", s)
 	}
 }
 
@@ -286,4 +379,136 @@ func TestFalsifyRequiresReason(t *testing.T) {
 	if err == nil {
 		t.Fatal("falsify with blank reason should error")
 	}
+}
+
+// A daily log citing [[theory]], committed recently, keeps theory from decaying
+// even though its last_reinforced is well past the stale window — citation as an
+// implicit signal of continued relevance. Confidence is not raised, only held.
+const citingDaily = `---
+id: 6b1f0c2e-1a2b-4c3d-8e4f-5a6b7c8d9e0f
+type: daily-log
+title: 2026-08-28
+timestamp: 2026-08-28 12:00:00
+---
+# 2026-08-28
+
+## 12:00:00
+### Log
+- revisited [[theory]] while debugging
+`
+
+func TestPassiveCitationRefresh(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.Local) // 56 days after last_reinforced
+
+	t.Run("recently cited note is refreshed, not decayed", func(t *testing.T) {
+		repo := t.TempDir()
+		writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+		writeVaultNote(t, repo, "daily/2026-08-28.md", citingDaily)
+		writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+		gitCommitAt(t, repo, "2026-08-28T12:00:00") // citing file committed 4 days ago
+
+		rep, err := Run(repo, Options{Now: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var kinds []string
+		for _, a := range rep.Actions {
+			if a.Note == "theory" {
+				kinds = append(kinds, a.Kind)
+			}
+		}
+		if strings.Contains(strings.Join(kinds, " "), "decayed") {
+			t.Fatalf("recently-cited note must not decay, got %v", kinds)
+		}
+		if !strings.Contains(strings.Join(kinds, " "), "refreshed") {
+			t.Fatalf("expected a refreshed action, got %v", kinds)
+		}
+		got, _ := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/concepts/theory.md"))
+		if !strings.Contains(string(got), "confidence: 0.7") {
+			t.Errorf("refresh must not change confidence; got:\n%s", got)
+		}
+	})
+
+	t.Run("uncited stale note still decays", func(t *testing.T) {
+		repo := t.TempDir()
+		writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+		writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+		gitCommitAt(t, repo, "2026-08-28T12:00:00")
+
+		rep, err := Run(repo, Options{Now: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decayed bool
+		for _, a := range rep.Actions {
+			if a.Note == "theory" && a.Kind == "decayed" {
+				decayed = true
+			}
+		}
+		if !decayed {
+			t.Fatalf("uncited stale note should decay, got %+v", rep.Actions)
+		}
+	})
+}
+
+const pausedStableNote = `---
+id: 7c2e1d3f-2b3c-4d5e-9f6a-7b8c9d0e1f2a
+type: concept
+confidence: 0.9
+maturity: stable
+last_reinforced: 2026-07-07 09:00:00
+reinforce_count: 4
+status: paused
+sources:
+  - "[[2026-07-07]]"
+---
+Blocked on a vendor fix.
+`
+
+// A paused note's decay clock is suspended: it neither decays nor counts as a
+// graduation candidate, and cannot be graduated until unpaused.
+func TestPausedNoteSuspendedFromLifecycle(t *testing.T) {
+	id := "7c2e1d3f-2b3c-4d5e-9f6a-7b8c9d0e1f2a"
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.Local)
+
+	setup := func(t *testing.T) string {
+		repo := t.TempDir()
+		writeVaultNote(t, repo, "knowledge/concepts/blocked.md", pausedStableNote)
+		writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+		gitCommitAt(t, repo, "2026-08-28T12:00:00")
+		return repo
+	}
+
+	t.Run("does not decay and is not a graduation candidate", func(t *testing.T) {
+		repo := setup(t)
+		rep, err := Run(repo, Options{Now: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range rep.Actions {
+			if a.Note == "blocked" && a.Kind == "decayed" {
+				t.Fatalf("paused note must not decay, got %+v", rep.Actions)
+			}
+		}
+		for _, c := range rep.StableCandidates {
+			if c == "blocked" {
+				t.Fatal("paused note must not be a graduation candidate")
+			}
+		}
+		got, _ := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/concepts/blocked.md"))
+		if !strings.Contains(string(got), "confidence: 0.9") {
+			t.Errorf("paused note confidence must be unchanged; got:\n%s", got)
+		}
+	})
+
+	t.Run("cannot be graduated while paused", func(t *testing.T) {
+		repo := setup(t)
+		_, err := Run(repo, Options{
+			Graduate: map[string]string{id: "projects/demo/blocked.md"},
+			Now:      now,
+		})
+		if err == nil || !strings.Contains(err.Error(), "paused") {
+			t.Fatalf("expected refusal to graduate a paused note, got %v", err)
+		}
+	})
 }
