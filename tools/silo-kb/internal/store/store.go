@@ -21,6 +21,7 @@ import (
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
 	"silo.local/silo-kb/internal/chunk"
+	"silo.local/silo-kb/internal/links"
 	"silo.local/silo-kb/internal/vault"
 )
 
@@ -112,6 +113,7 @@ type ReindexStats struct {
 	ChunksKept     int
 	ChunksEmbedded int
 	NotesPruned    int64
+	Links          int
 }
 
 // Reindex delta-syncs the vault into Postgres in a single transaction: an
@@ -129,7 +131,7 @@ func Reindex(ctx context.Context, pool *pgxpool.Pool, emb Embedder, notes []*vau
 	defer tx.Rollback(ctx)
 
 	if full {
-		if _, err := tx.Exec(ctx, "truncate chunks, notes"); err != nil {
+		if _, err := tx.Exec(ctx, "truncate chunks, links, notes"); err != nil {
 			return nil, err
 		}
 	}
@@ -248,15 +250,70 @@ func Reindex(ctx context.Context, pool *pgxpool.Pool, emb Embedder, notes []*vau
 		}
 	}
 
-	// Prune notes deleted from the vault (cascade removes their chunks).
+	// Prune notes deleted from the vault (cascade removes their chunks + links).
 	tag, err := tx.Exec(ctx, "delete from notes where not (id = any($1))", seen)
 	if err != nil {
 		return nil, err
 	}
 	stats.NotesPruned = tag.RowsAffected()
 
+	// Rebuild the link graph from scratch: it is small and fully derived from
+	// the (now current) note set, so a wholesale rebuild is simpler and more
+	// robust than delta-tracking edges, and every FK target is guaranteed
+	// present. Dangling links (target basename with no note) are dropped.
+	linkCount, err := rebuildLinks(ctx, tx, notes)
+	if err != nil {
+		return nil, fmt.Errorf("rebuild links: %w", err)
+	}
+	stats.Links = linkCount
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return stats, nil
+}
+
+// rebuildLinks replaces the whole links table with the edges resolvable from
+// notes' `sources` frontmatter and body wikilinks. Basenames resolve to note
+// ids via a first-wins map (ids are the unique key; basenames are only
+// effectively unique). Self-links and dangling targets are skipped.
+func rebuildLinks(ctx context.Context, tx pgx.Tx, notes []*vault.Note) (int, error) {
+	byName := make(map[string]uuid.UUID, len(notes))
+	for _, n := range notes {
+		id, err := uuid.Parse(n.ID())
+		if err != nil {
+			return 0, err
+		}
+		bn := strings.TrimSuffix(filepath.Base(n.Path), ".md")
+		if _, dup := byName[bn]; !dup {
+			byName[bn] = id
+		}
+	}
+
+	if _, err := tx.Exec(ctx, "delete from links"); err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, n := range notes {
+		srcID, err := uuid.Parse(n.ID())
+		if err != nil {
+			return 0, err
+		}
+		for _, ref := range links.Targets(n) {
+			dstID, ok := byName[ref.Name]
+			if !ok || dstID == srcID {
+				continue
+			}
+			tag, err := tx.Exec(ctx, `
+				insert into links (src_note_id, dst_note_id, kind)
+				values ($1,$2,$3) on conflict do nothing`,
+				srcID, dstID, string(ref.Kind))
+			if err != nil {
+				return 0, err
+			}
+			count += int(tag.RowsAffected())
+		}
+	}
+	return count, nil
 }

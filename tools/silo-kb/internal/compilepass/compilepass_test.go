@@ -34,7 +34,7 @@ sources:
 A working theory.
 `
 
-func TestFalsifyArchivesWithReason(t *testing.T) {
+func TestFalsifyRetainsInPlaceWithReason(t *testing.T) {
 	repo := t.TempDir()
 	writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
 	// log.md must exist for the audit append.
@@ -52,18 +52,80 @@ func TestFalsifyArchivesWithReason(t *testing.T) {
 		t.Fatalf("expected one falsified action, got %+v", rep.Actions)
 	}
 
-	// Original gone, archived copy present with reason + status.
-	if _, err := os.Stat(filepath.Join(repo, "knowledge-base/knowledge/concepts/theory.md")); !os.IsNotExist(err) {
-		t.Error("original note should have been moved")
+	// Note stays in place (retained + queryable), NOT moved to archive.
+	if _, err := os.Stat(filepath.Join(repo, "knowledge-base/knowledge/archive/falsified/theory.md")); !os.IsNotExist(err) {
+		t.Error("falsified note must not be archived — it is retained in place")
 	}
-	got, err := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/archive/falsified/theory.md"))
+	got, err := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/concepts/theory.md"))
 	if err != nil {
-		t.Fatalf("archived note missing: %v", err)
+		t.Fatalf("retained note missing: %v", err)
 	}
 	for _, want := range []string{"status: falsified", "falsified_reason: contradicted by benchmark X", "falsified_at: 2026-07-07 12:00:00"} {
 		if !strings.Contains(string(got), want) {
-			t.Errorf("archived note missing %q; got:\n%s", want, got)
+			t.Errorf("retained note missing %q; got:\n%s", want, got)
 		}
+	}
+}
+
+// A falsified note is inert on later runs: it never decays, archives, or
+// graduates, and it is not a valid reinforce/graduate target.
+func TestFalsifiedNoteIsInert(t *testing.T) {
+	repo := t.TempDir()
+	id := "de6d5441-c97e-415f-b5ca-0df850ff0d84"
+	writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+	writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+
+	// Falsify it.
+	if _, err := Run(repo, Options{
+		Falsify: map[string]string{id: "wrong"},
+		Now:     time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later run, well past the decay window, must not touch it.
+	rep, err := Run(repo, Options{
+		Now: time.Date(2026, 9, 1, 12, 0, 0, 0, time.Local),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range rep.Actions {
+		if a.Note == "theory" {
+			t.Errorf("falsified note should be inert, got action %+v", a)
+		}
+	}
+
+	// It is no longer a valid reinforce target.
+	if _, err := Run(repo, Options{
+		Reinforce: []string{id},
+		Now:       time.Date(2026, 9, 1, 12, 0, 0, 0, time.Local),
+	}); err == nil {
+		t.Error("expected error reinforcing a falsified (non-live) note")
+	}
+}
+
+// --supersede records the replacement as a superseded_by wikilink.
+func TestFalsifyWithSupersede(t *testing.T) {
+	repo := t.TempDir()
+	oldID := "de6d5441-c97e-415f-b5ca-0df850ff0d84"
+	writeVaultNote(t, repo, "knowledge/concepts/theory.md", seedNote)
+	writeVaultNote(t, repo, "knowledge/concepts/better.md", stableNote)
+	writeVaultNote(t, repo, "knowledge/log.md", "# Compilation log\n")
+
+	if _, err := Run(repo, Options{
+		Falsify:   map[string]string{oldID: "superseded"},
+		Supersede: map[string]string{oldID: "3f8e2c1a-9b4d-4e6f-8a2b-1c3d5e7f9a0b"},
+		Now:       time.Date(2026, 7, 7, 12, 0, 0, 0, time.Local),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(repo, "knowledge-base/knowledge/concepts/theory.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "superseded_by: '[[better]]'") && !strings.Contains(string(got), "superseded_by: \"[[better]]\"") && !strings.Contains(string(got), "superseded_by: [[better]]") {
+		t.Errorf("expected superseded_by wikilink to [[better]]; got:\n%s", got)
 	}
 }
 

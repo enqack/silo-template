@@ -23,7 +23,6 @@ var tierDirs = []string{
 	"knowledge/cursed-knowledge",
 	"knowledge/lessons-learned",
 	"knowledge/archive/faded",
-	"knowledge/archive/falsified",
 	"projects",
 }
 

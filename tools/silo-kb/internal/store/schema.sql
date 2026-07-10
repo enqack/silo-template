@@ -23,7 +23,20 @@ create table if not exists chunks (
   unique (note_id, ordinal)
 );
 
+-- Resolved outbound links between notes: body wikilinks (kind='wikilink') and
+-- `sources` provenance (kind='source'). Derived from the markdown, rebuilt on
+-- every reindex. Powers the graph leg of retrieval and provenance traversal.
+-- Kept as a relational edge list (not a graph extension) so it stays PG16-native
+-- and, in a future PG19, is a drop-in property-graph view.
+create table if not exists links (
+  src_note_id uuid not null references notes(id) on delete cascade,
+  dst_note_id uuid not null references notes(id) on delete cascade,
+  kind        text not null,          -- 'wikilink' | 'source'
+  primary key (src_note_id, dst_note_id, kind)
+);
+
 create index if not exists notes_project_idx on notes (project);
 create index if not exists notes_path_idx on notes (path);
 create index if not exists chunks_embedding_idx on chunks using hnsw (embedding vector_cosine_ops);
 create index if not exists chunks_fts_idx on chunks using gin (fts);
+create index if not exists links_dst_idx on links (dst_note_id);

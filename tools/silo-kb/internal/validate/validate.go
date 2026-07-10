@@ -14,10 +14,16 @@ import (
 
 var maturities = map[string]bool{"seed": true, "developing": true, "stable": true}
 
-// liveStatuses are the truth-states a knowledge note may carry while it is still
-// live. `falsified` is not here: falsification is a move into
-// knowledge/archive/falsified/, and archived notes are validator-exempt.
+// liveStatuses are the truth-states a knowledge note may carry while it is
+// still an asserted belief: absent ⇒ active, or an explicitly contested
+// `disputed`.
 var liveStatuses = map[string]bool{"active": true, "disputed": true}
+
+// StatusFalsified is retained-but-invalidated: the note stays live in
+// knowledge/ (queryable for as-of/history), frozen against decay, stamped with
+// when we learned it was false. It carries extra required fields — see
+// validateKnowledge — so it is validated in place, not archive-exempt.
+const StatusFalsified = "falsified"
 
 // decayFields are required on knowledge/* notes and forbidden on projects/*.
 var decayFields = []string{"confidence", "maturity", "last_reinforced", "reinforce_count"}
@@ -133,10 +139,28 @@ func validateKnowledge(fm map[string]any) []string {
 
 	// `status` is optional (absent ⇒ active). A note the agent has actively
 	// contested is `disputed` — recorded dissent that survives, distinct from a
-	// note that merely decayed from neglect.
+	// note that merely decayed from neglect. `falsified` is retained in place
+	// and carries a reason + the time we learned it was false, plus an optional
+	// `superseded_by` wikilink to the belief that replaced it.
 	if s, present := fm["status"]; present {
-		if str, _ := s.(string); !liveStatuses[str] {
-			errs = append(errs, "knowledge/* `status`, if set, must be one of: active, disputed (falsification archives the note instead)")
+		str, _ := s.(string)
+		switch {
+		case str == StatusFalsified:
+			if r, _ := fm["falsified_reason"].(string); strings.TrimSpace(r) == "" {
+				errs = append(errs, "knowledge/* `status: falsified` requires a non-empty `falsified_reason`")
+			}
+			if fa, present := fm["falsified_at"]; !present {
+				errs = append(errs, "knowledge/* `status: falsified` requires `falsified_at` (YYYY-MM-DD HH:MM:SS)")
+			} else if _, err := TimeOf(fa); err != nil {
+				errs = append(errs, fmt.Sprintf("`falsified_at` %v", err))
+			}
+			if sb, present := fm["superseded_by"]; present {
+				if str, _ := sb.(string); strings.TrimSpace(str) == "" {
+					errs = append(errs, "`superseded_by`, if set, must be a non-empty wikilink")
+				}
+			}
+		case !liveStatuses[str]:
+			errs = append(errs, "knowledge/* `status`, if set, must be one of: active, disputed, falsified")
 		}
 	}
 	return errs

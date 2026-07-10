@@ -134,12 +134,12 @@
             mkdir -p knowledge-base/daily knowledge-base/deep-thoughts \
               knowledge-base/knowledge/concepts knowledge-base/knowledge/cursed-knowledge \
               knowledge-base/knowledge/lessons-learned \
-              knowledge-base/knowledge/archive/faded knowledge-base/knowledge/archive/falsified \
+              knowledge-base/knowledge/archive/faded \
               knowledge-base/projects
             touch knowledge-base/daily/.gitkeep knowledge-base/deep-thoughts/.gitkeep \
               knowledge-base/knowledge/concepts/.gitkeep knowledge-base/knowledge/cursed-knowledge/.gitkeep \
               knowledge-base/knowledge/lessons-learned/.gitkeep \
-              knowledge-base/knowledge/archive/faded/.gitkeep knowledge-base/knowledge/archive/falsified/.gitkeep \
+              knowledge-base/knowledge/archive/faded/.gitkeep \
               knowledge-base/projects/.gitkeep
             cat > knowledge-base/index.md <<'EOF'
           ---

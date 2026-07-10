@@ -35,6 +35,7 @@ type Options struct {
 	Reinforce []string          // note ids or vault-relative paths
 	Graduate  map[string]string // id (or path) -> vault-relative destination under projects/
 	Falsify   map[string]string // id (or path) -> reason the theory was determined false
+	Supersede map[string]string // falsified note id (or path) -> replacement note id (or path)
 	DryRun    bool
 	Now       time.Time
 }
@@ -93,13 +94,28 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 	for k, v := range opts.Falsify {
 		falsify[k] = v
 	}
+	supersede := map[string]string{}
+	for k, v := range opts.Supersede {
+		supersede[k] = v
+	}
+
+	// id/path -> wikilink basename, so a --supersede target resolves to the
+	// wikilink written into the falsified note's `superseded_by`.
+	wikiByKey := map[string]string{}
+	for _, n := range notes {
+		wikiByKey[n.ID()] = wikiname(n.Path)
+		wikiByKey[n.Path] = wikiname(n.Path)
+	}
 
 	// Every requested id/path must resolve to a live knowledge note — a typo
 	// silently doing nothing would let the agent report work that never
 	// happened. Checked up front, before any write.
+	// A falsified note is retained and queryable but terminal for the
+	// lifecycle: it is not a valid target of reinforce/graduate/falsify, so it
+	// is excluded from the live set (naming one is a typo worth surfacing).
 	live := map[string]bool{}
 	for _, n := range notes {
-		if n.Tier == vault.TierKnowledge && !strings.HasPrefix(n.Path, "knowledge/archive/") {
+		if n.Tier == vault.TierKnowledge && !strings.HasPrefix(n.Path, "knowledge/archive/") && statusOf(n) != validate.StatusFalsified {
 			live[n.ID()] = true
 			live[n.Path] = true
 		}
@@ -120,6 +136,16 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 			unknown = append(unknown, "--falsify "+k)
 		}
 	}
+	// Every --supersede must attach to a note being falsified this run, and its
+	// replacement must resolve to a real note.
+	for k, repl := range supersede {
+		if _, ok := falsify[k]; !ok {
+			unknown = append(unknown, "--supersede "+k+" (no matching --falsify)")
+		}
+		if _, ok := wikiByKey[repl]; !ok {
+			unknown = append(unknown, "--supersede replacement "+repl)
+		}
+	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
 		return nil, fmt.Errorf("no live knowledge note matches:\n  %s\n(ids/paths must name a note under knowledge/ outside archive/)",
@@ -135,27 +161,38 @@ func Run(repoRoot string, opts Options) (*Report, error) {
 		name := wikiname(n.Path)
 		abs := filepath.Join(vaultRoot, n.Path)
 
+		// An already-falsified note is retained but inert: it stays live and
+		// queryable for as-of/history, but never decays, archives, or graduates.
+		// Skip it before any lifecycle branch (it was excluded from the live set,
+		// so it is never a reinforce/graduate/falsify target either).
+		if statusOf(n) == validate.StatusFalsified {
+			continue
+		}
+
 		// 0. Falsify (explicit, wins over everything). A note the agent has
-		// determined false is archived with its reason — it was wrong, not
-		// forgotten — bypassing the confidence/decay machinery entirely.
+		// determined false is invalidated in place with its reason — it was
+		// wrong, not forgotten. It stays in knowledge/ (queryable, but frozen and
+		// excluded from default retrieval), bypassing the confidence/decay
+		// machinery. `timestamp`..`falsified_at` is the window it was believed.
 		if reason, ok := pick(falsify, n.ID(), n.Path); ok {
 			if strings.TrimSpace(reason) == "" {
 				return nil, fmt.Errorf("%s: refusing to falsify without a reason", n.Path)
 			}
-			dest := filepath.Join("knowledge/archive/falsified", filepath.Base(n.Path))
-			report.Actions = append(report.Actions, Action{"falsified", name, "(" + reason + ")"})
+			detail := "(" + reason + ")"
+			if repl, ok := pick(supersede, n.ID(), n.Path); ok {
+				detail += " → [[" + wikiByKey[repl] + "]]"
+			}
+			report.Actions = append(report.Actions, Action{"falsified", name, detail})
 			if !opts.DryRun {
-				setFM(n.FMNode, "status", "falsified")
+				setFM(n.FMNode, "status", validate.StatusFalsified)
 				setFM(n.FMNode, "falsified_reason", reason)
 				setFM(n.FMNode, "falsified_at", opts.Now.Format(validate.TimeLayout))
-				// Validate against the destination (archived ⇒ exempt), write in
-				// place, then move — same ordering as graduate.
-				src := n.Path
-				n.Path = dest
-				if err := writeNote(abs, n); err != nil {
-					return nil, err
+				if repl, ok := pick(supersede, n.ID(), n.Path); ok {
+					setFM(n.FMNode, "superseded_by", "[["+wikiByKey[repl]+"]]")
 				}
-				if err := moveNote(vaultRoot, src, dest); err != nil {
+				// Retained in place: validate against the (unchanged) live path and
+				// write — no move.
+				if err := writeNote(abs, n); err != nil {
 					return nil, err
 				}
 			}
@@ -406,6 +443,11 @@ func pick(m map[string]string, keys ...string) (string, bool) {
 
 func wikiname(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".md")
+}
+
+func statusOf(n *vault.Note) string {
+	s, _ := n.Frontmatter["status"].(string)
+	return s
 }
 
 func toFloat(v any) float64 {

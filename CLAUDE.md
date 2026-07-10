@@ -73,16 +73,16 @@ administrative CLI command (human- or slash-command-driven, some destructive).
 
 | Command | Purpose |
 |---|---|
-| `query_knowledge` (MCP tool) | hybrid RRF retrieval — your default way to read the vault; never touches Postgres directly |
+| `query_knowledge` (MCP tool) | hybrid RRF retrieval (semantic + keyword + graph leg) — your default way to read the vault; never touches Postgres directly. Falsified notes are excluded unless `include_falsified: true` |
 | `silo-kb serve-mcp` | stdio MCP server that exposes `query_knowledge` |
 
 **Administrative CLI (human- or slash-command-driven):**
 
 | Command | Purpose |
 |---|---|
-| `silo-kb query "text" [--project P] [--top-k N]` | hybrid RRF retrieval from the shell (the CLI form of `query_knowledge`) |
-| `silo-kb reindex [--full]` | delta-sync the vault into Postgres (chunks + embeddings) |
-| `silo-kb compile [--dry-run] [--reinforce …] [--falsify …] [--graduate …]` | knowledge lifecycle run |
+| `silo-kb query "text" [--project P] [--top-k N] [--include-falsified]` | hybrid RRF retrieval from the shell (the CLI form of `query_knowledge`) |
+| `silo-kb reindex [--full]` | delta-sync the vault into Postgres (chunks + embeddings + link graph) |
+| `silo-kb compile [--dry-run] [--reinforce …] [--falsify …] [--supersede …] [--graduate …]` | knowledge lifecycle run |
 | `silo-kb sync-index` | regenerate `knowledge-base/knowledge/index.md` |
 | `silo-kb inject-index --budget N` | truncated index for SessionStart injection |
 | `silo-kb validate` | check the whole vault against the frontmatter contract (also the PreToolUse/pre-commit gate) |

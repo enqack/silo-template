@@ -12,6 +12,7 @@ import (
 	"silo.local/silo-kb/internal/compilepass"
 	"silo.local/silo-kb/internal/embed"
 	"silo.local/silo-kb/internal/indexgen"
+	"silo.local/silo-kb/internal/links"
 	"silo.local/silo-kb/internal/mcpserver"
 	"silo.local/silo-kb/internal/query"
 	"silo.local/silo-kb/internal/scaffold"
@@ -72,9 +73,9 @@ func reindexCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("notes: %d (%d unchanged, %d moved, %d pruned)\nchunks: %d embedded, %d unchanged\n",
+			fmt.Printf("notes: %d (%d unchanged, %d moved, %d pruned)\nchunks: %d embedded, %d unchanged\nlinks: %d\n",
 				stats.Notes, stats.SkippedNotes, stats.MovedNotes, stats.NotesPruned,
-				stats.ChunksEmbedded, stats.ChunksKept)
+				stats.ChunksEmbedded, stats.ChunksKept, stats.Links)
 			return nil
 		},
 	}
@@ -136,6 +137,7 @@ func resetCmd() *cobra.Command {
 func queryCmd() *cobra.Command {
 	var project string
 	var topK int
+	var includeFalsified bool
 	cmd := &cobra.Command{
 		Use:   "query <text>",
 		Short: "Hybrid RRF retrieval over the full corpus",
@@ -151,7 +153,7 @@ func queryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			results, err := query.Run(ctx, pool, vec, args[0], project, topK)
+			results, err := query.Run(ctx, pool, vec, args[0], project, topK, includeFalsified)
 			if err != nil {
 				return err
 			}
@@ -161,6 +163,7 @@ func queryCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&project, "project", "", "restrict to one project")
 	cmd.Flags().IntVar(&topK, "top-k", query.DefaultTopK, "number of fused results")
+	cmd.Flags().BoolVar(&includeFalsified, "include-falsified", false, "include retained-but-invalidated (falsified) notes in results")
 	return cmd
 }
 
@@ -168,6 +171,7 @@ func compileCmd() *cobra.Command {
 	var reinforce []string
 	var graduate []string
 	var falsify []string
+	var supersede []string
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "compile",
@@ -193,10 +197,19 @@ func compileCmd() *cobra.Command {
 				}
 				fals[k] = v
 			}
+			sup := map[string]string{}
+			for _, s := range supersede {
+				k, v, ok := strings.Cut(s, ":")
+				if !ok || strings.TrimSpace(v) == "" {
+					return fmt.Errorf("--supersede wants <falsified-id-or-path>:<replacement-id-or-path>, got %q", s)
+				}
+				sup[k] = v
+			}
 			report, err := compilepass.Run(root, compilepass.Options{
 				Reinforce: reinforce,
 				Graduate:  grad,
 				Falsify:   fals,
+				Supersede: sup,
 				DryRun:    dryRun,
 			})
 			if err != nil {
@@ -214,7 +227,8 @@ func compileCmd() *cobra.Command {
 	// text — a comma inside a reason must not split the value. Repeat the flag
 	// for multiple notes.
 	cmd.Flags().StringArrayVar(&graduate, "graduate", nil, "<id-or-path>:<projects/name/dest.md> — move a stable article to canon (repeatable)")
-	cmd.Flags().StringArrayVar(&falsify, "falsify", nil, "<id-or-path>=<reason> — archive a theory determined false (records dissent, not decay; repeatable)")
+	cmd.Flags().StringArrayVar(&falsify, "falsify", nil, "<id-or-path>=<reason> — invalidate a theory determined false in place (retained + queryable, records dissent not decay; repeatable)")
+	cmd.Flags().StringArrayVar(&supersede, "supersede", nil, "<falsified-id-or-path>:<replacement-id-or-path> — record what replaced a note falsified this run (repeatable)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report without writing")
 	return cmd
 }
@@ -285,8 +299,19 @@ func validateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := vault.Walk(vr); err != nil {
+			notes, err := vault.Walk(vr)
+			if err != nil {
 				return err
+			}
+			// Whole-vault provenance check: a knowledge note's `sources` must
+			// resolve to real captures. This needs the full note set, so it lives
+			// here rather than in the per-note validate.Note (and the PreToolUse
+			// hook, which sees one file at a time).
+			if errs := validateProvenance(notes); len(errs) > 0 {
+				for _, e := range errs {
+					fmt.Fprintln(os.Stderr, e)
+				}
+				return fmt.Errorf("%d unresolved provenance source(s)", len(errs))
 			}
 			fmt.Println("vault valid")
 			return nil
@@ -294,6 +319,30 @@ func validateCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&hookStdin, "hook-stdin", false, "read a Claude Code PreToolUse hook payload from stdin")
 	return cmd
+}
+
+// validateProvenance enforces that every live knowledge note's `sources`
+// entries resolve to an existing daily/ or deep-thought capture. Provenance is
+// part of the contract: an unresolved source is a hard failure, not a warning.
+func validateProvenance(notes []*vault.Note) []string {
+	captures := map[string]bool{}
+	for _, n := range notes {
+		if n.Tier == vault.TierDaily || n.Tier == vault.TierDeepThought {
+			captures[strings.TrimSuffix(filepath.Base(n.Path), ".md")] = true
+		}
+	}
+	var errs []string
+	for _, n := range notes {
+		if n.Tier != vault.TierKnowledge || strings.HasPrefix(n.Path, "knowledge/archive/") {
+			continue
+		}
+		for _, src := range links.Sources(n) {
+			if !captures[src] {
+				errs = append(errs, fmt.Sprintf("%s: sources entry [[%s]] does not resolve to an existing daily/ or deep-thought note", n.Path, src))
+			}
+		}
+	}
+	return errs
 }
 
 // hookInput is the subset of the Claude Code PreToolUse payload we need.

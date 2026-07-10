@@ -37,9 +37,12 @@ The vault has **two knowledge tiers plus two raw-capture tiers**:
 - **Asserted canon** — `projects/**` is durable, settled documentation, exempt from the lifecycle. If a
   note lives here, it's asserted, not hypothesized.
 
-The signal is the directory. The markdown tree is authoritative; Postgres (pgvector + full-text) is a
+The signal is the directory. The markdown tree is authoritative; Postgres (pgvector + full-text, plus a
+derived `links` edge table extracted from `sources:` provenance and body wikilinks) is a
 **derived, droppable index** — `silo-kb reindex --full` rebuilds it entirely from the working tree. If
-the database ever disagrees with the markdown, the database is wrong.
+the database ever disagrees with the markdown, the database is wrong. Retrieval (`query_knowledge`)
+fuses three legs by reciprocal rank fusion: semantic (pgvector) + keyword (full-text) as the primary
+signals, plus a weighted graph leg that expands one hop along `links` to boost linked-but-weak notes.
 
 **The database is safe from the agent by construction.** Agents retrieve through the read-only
 `query_knowledge` MCP tool and never write to Postgres directly (the interface/implementation boundary
@@ -74,8 +77,9 @@ by directory; add a subdirectory when it earns its keep, not speculatively):
   into an article here.
 - `lessons-learned/` — postmortem reflections: what worked, what didn't, and why. Authored
   deliberately (nothing auto-populates it), and worth keeping even when empty.
-- `archive/` — retired notes: `archive/faded/` (decayed to zero confidence) and `archive/falsified/`
-  (judged false).
+- `archive/` — retired notes: `archive/faded/` (decayed to zero confidence) and `archive/` (ancient:
+  no git commit in >6 months). Falsified notes are **not** archived — they are retained in place (see
+  the lifecycle).
 
 ## The lifecycle
 
@@ -87,9 +91,15 @@ Run via `/kb-compile` (or `silo-kb compile` by hand). Each run:
   `reinforce_count` ≥3. Promotion never happens on decay or by hand-editing.
 - **Decays** articles stale >30 days: −0.1 per run.
 - **Falsifies** on demand (`--falsify <id>=<reason>`, explicit and agent-justified): a theory judged
-  outright false moves to `knowledge/archive/falsified/` with `status: falsified` and its reason
-  recorded. This wins over reinforce/decay — being wrong is distinguished from being forgotten. (For a
-  note you contest but haven't disproven, set `status: disputed` and leave it live.)
+  outright false is **retained in place**, not archived — it stays in `knowledge/` stamped
+  `status: falsified` with `falsified_reason` and `falsified_at` (the moment we learned it was false),
+  optionally with `superseded_by` (`--supersede <id>:<replacement-id>`) pointing at the belief that
+  replaced it. The `timestamp`..`falsified_at` span is the window the note was believed, so "what did we
+  hold as of date T" stays answerable. A falsified note is frozen and **inert**: it never decays,
+  archives, graduates, or serves as a reinforce/graduate target, and it is excluded from default
+  retrieval (surfaced only with `--include-falsified`). This wins over reinforce/decay — being wrong is
+  distinguished from being forgotten. (For a note you contest but haven't disproven, set
+  `status: disputed` and leave it live.)
 - **Archives** faded articles (confidence ≤ 0 → `knowledge/archive/faded/`) and ancient ones (no git
   commit in >6 months → `knowledge/archive/`). A note reinforced in the same run is shielded from
   ancient-archival.
@@ -114,7 +124,11 @@ Enforced by `silo-kb validate` (the PreToolUse hook inside Claude Code and the p
   `tags`, `timestamp`.
 - **`knowledge/**` (working theory)** additionally requires: `confidence` (0–1), `maturity`
   (`seed`|`developing`|`stable`), `last_reinforced`, `reinforce_count`, and a non-empty `sources` list.
-  Optional `status`: `active` (default) or `disputed`.
+  Every `sources` entry must **resolve** to an existing `daily/` or `deep-thought` capture — an
+  unresolved provenance link is a hard `silo-kb validate` failure (checked whole-vault, so it is
+  surfaced by the CLI/pre-commit gate rather than the per-file PreToolUse hook). Optional `status`:
+  `active` (default), `disputed`, or `falsified`; a `falsified` note additionally carries
+  `falsified_reason` and `falsified_at`, and may carry `superseded_by` (a wikilink).
 - **`projects/**` (asserted canon)** must **NOT** carry any decay fields.
 - **Timestamps** are `YYYY-MM-DD HH:MM:SS` (local time) everywhere a full timestamp appears — except
   daily-log capture-batch headings, which are time-only `## HH:MM:SS` (the file is already dated by its

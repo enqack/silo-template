@@ -16,9 +16,10 @@ import (
 )
 
 type queryArgs struct {
-	Text    string `json:"text" jsonschema:"natural-language search text"`
-	Project string `json:"project,omitempty" jsonschema:"optional project filter: the bare project name, i.e. <name> for notes under projects/<name>/"`
-	TopK    int    `json:"top_k,omitempty" jsonschema:"number of results, default 8"`
+	Text             string `json:"text" jsonschema:"natural-language search text"`
+	Project          string `json:"project,omitempty" jsonschema:"optional project filter: the bare project name, i.e. <name> for notes under projects/<name>/"`
+	TopK             int    `json:"top_k,omitempty" jsonschema:"number of results, default 8"`
+	IncludeFalsified bool   `json:"include_falsified,omitempty" jsonschema:"include retained-but-invalidated (falsified) notes; default false so results reflect what is currently believed"`
 }
 
 // Run serves MCP over stdio until the client disconnects.
@@ -43,7 +44,7 @@ func Run(ctx context.Context) error {
 		if err != nil {
 			return nil, nil, err
 		}
-		results, err := query.Run(ctx, pool, vec, args.Text, args.Project, args.TopK)
+		results, err := query.Run(ctx, pool, vec, args.Text, args.Project, args.TopK, args.IncludeFalsified)
 		if err != nil {
 			return nil, nil, err
 		}
